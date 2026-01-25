@@ -6,8 +6,8 @@ from pathlib import Path
 from ct2foam.thermo_transport import ct_properties
 from ct2foam.thermo_transport import  transport_fitter as tr_fitter
 from ct2foam.thermo_transport import  thermo_fitter as th_fitter
-from ct2foam.thermo_transport import ct2foam_utils 
-from ct2foam.thermo_transport import  foam_writer 
+from ct2foam.thermo_transport import ct2foam_utils
+from ct2foam.thermo_transport import  foam_writer
 
 """
 OF_referece/Test-thermoMixture.C is used as a source of the reference data tested here.
@@ -29,7 +29,7 @@ class TestThermoTransport(unittest.TestCase):
     def test_euken0(self):
         T, As, Ts, W = 1, 1, 1, 2
         cv_mole = -R + 4
-        kappa_foam = 936.697882481863 
+        kappa_foam = 936.697882481863
         mu = tr_fitter.sutherland(T, As, Ts)
         kappa = tr_fitter.euken(mu, cv_mole, W, R)
         self.assertTrue(np.abs(kappa-kappa_foam) < eps)
@@ -70,13 +70,13 @@ class TestThermoTransport(unittest.TestCase):
 
     def test_transport_fit(self):
 
-        data = ct_properties.ctThermoTransport("h2o2.cti", verbose=False)
+        data = ct_properties.ctThermoTransport("h2o2.yaml", verbose=False)
         data.evaluate_properties()
 
-        transport_fits = ct2foam_utils.fit_ct_transport(data)        
+        transport_fits = ct2foam_utils.fit_ct_transport(data)
         success = ct2foam_utils.transport_fit_quality(data, transport_fits, test_data_dir, False, 0.02, 0.08, 5e-3)
         self.assertTrue(success)
-    
+
     def test_transport_sanity(self):
         """
         Reference values taken from NIST data base
@@ -85,7 +85,7 @@ class TestThermoTransport(unittest.TestCase):
         cv_mole, W = 21005.045895231186, 28.014
         species_name = "N2"
 
-        data = ct_properties.ctThermoTransport("gri30.cti", verbose=False)
+        data = ct_properties.ctThermoTransport("gri30.yaml", verbose=False)
         data.evaluate_properties()
         i = data.gas.species_index(species_name)
 
@@ -128,9 +128,9 @@ class TestThermoTransport(unittest.TestCase):
         thermo = ct_properties.ctThermoTransport(Path(test_data_dir, "h2o2_mod.yaml"), verbose=False)
         nasa7 = thermo.is_nasa7(0)
         self.assertFalse(nasa7)
-    
+
     def test_mixture_transport(self):
-        mech = "gri30.cti"
+        mech = "gri30.yaml"
         mix_name = "test"
         ct_mixture = "O2: 1, N2: 3.76"
 
@@ -153,7 +153,7 @@ class TestThermoTransport(unittest.TestCase):
         self.assertTrue(np.abs(kappa_p[Ti] - kappa_ref)/np.abs(kappa_ref) < 0.01)
 
     def test_mixture_thermo(self):
-        mech = "gri30.cti"
+        mech = "gri30.yaml"
         mix_name = "test"
         ct_mixture = "O2: 1, N2: 3.76"
         nasa7_Tmid = 1000.0
@@ -169,7 +169,7 @@ class TestThermoTransport(unittest.TestCase):
         self.assertTrue(np.abs(cp - cp_ref)/np.abs(cp_ref) < 0.01)
 
     def test_thermo_foam_writer(self):
-        
+
         test_file = Path(test_data_dir, "testDict")
         foam_file_ref = Path(test_data_dir, "OF_reference", "refDict")
 
@@ -196,9 +196,9 @@ class TestThermoTransport(unittest.TestCase):
         # Writes a dictionary which is used by test_data/OF_reference/Test_thermoMixture.C
         """
         from shutil import copyfile
-        data = ct_properties.ctThermoTransport("h2o2.cti", verbose=False)
+        data = ct_properties.ctThermoTransport("h2o2.yaml", verbose=False)
         data.evaluate_properties()
-    
+
         transport_fits = ct2foam_utils.fit_ct_transport(data, poly_order=3)
         cwd = os.getcwd()
         thermo_fits = ct2foam_utils.refit_ct_thermo(data, data.Tmid, test_data_dir)

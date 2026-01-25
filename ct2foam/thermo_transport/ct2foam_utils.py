@@ -14,7 +14,7 @@ from ct2foam.thermo_transport import foam_writer as writer
 def nasa_normalisation(T, cp_mole, h_mole, s_mole, R=ct.gas_constant):
     """
     Divide by gas constant (and T) according to NASA JANAF definitions.
-    Assuming data structure [M,] or [M,N] shaped data, where M is the number of species and N is data size      
+    Assuming data structure [M,] or [M,N] shaped data, where M is the number of species and N is data size
     """
     cp_over_R = cp_mole / R
     h_over_RT = h_mole[None, :] / (T * R)
@@ -55,7 +55,7 @@ def transport_fit_quality(data, transport_fits, output_dir, plot=True, rel_tol_s
     """
     names, T, mu, kappa, cv_mole, W = data.names, data.T, data.mu, data.kappa, data.cv_mole, data.W
     As, Ts, std, poly_mu, poly_kappa, logpoly_mu, logpoly_kappa = transport_fits
-    
+
     N = mu.shape[0]
     success = True
 
@@ -65,7 +65,7 @@ def transport_fit_quality(data, transport_fits, output_dir, plot=True, rel_tol_s
         err_mu_poly, err_kappa_poly = tr_fitter.error_polynomial(mu[i,:], kappa[i,:], poly_mu[i,:], poly_kappa[i,:], T)
         err_mu_logpoly, err_kappa_logpoly = tr_fitter.error_log_polynomial(mu[i,:], kappa[i,:], logpoly_mu[i,:], logpoly_kappa[i,:], T)
 
-        sutherland_ok = (err_mu_sutherland < rel_tol_sutherland) and (err_kappa_sutherland < rel_tol_Euken) 
+        sutherland_ok = (err_mu_sutherland < rel_tol_sutherland) and (err_kappa_sutherland < rel_tol_Euken)
         polynomial_ok = (err_mu_poly < rel_tol_poly) and (err_kappa_poly < rel_tol_poly)
         logpolynomial_ok = (err_mu_logpoly < rel_tol_poly) and (err_kappa_logpoly < rel_tol_poly)
 
@@ -90,7 +90,7 @@ def transport_fit_quality(data, transport_fits, output_dir, plot=True, rel_tol_s
 
 
 def plot_transport_comparison(name, T, mu, kappa, poly_coeffs_mu, poly_coeffs_kappa, As, Ts, cv_mole, W, output_dir):
-    
+
     mu_sutherland = tr_fitter.sutherland(T, As, Ts)
     kappa_euken = tr_fitter.euken(mu_sutherland, cv_mole, W, ct.gas_constant)
     mu_poly, kappa_poly = tr_fitter.eval_polynomial(poly_coeffs_mu, poly_coeffs_kappa, T)
@@ -228,7 +228,7 @@ def fit_mixture_thermo(data):
     """
     Tci = np.where(data.T == data.Tmid)[0][0]
     cp_over_R, h_over_RT, s_over_R = nasa_normalisation(data.T, data.cp, data.h, data.s)
-    coeffs_lo, coeffs_hi = th_fitter.fit_nasapolys_full(data.T, Tci, cp_over_R[0], h_over_RT[0], s_over_R[0], data.cp0_over_R, data.dhf_over_R, data.s0_over_R)
+    coeffs_lo, coeffs_hi = th_fitter.fit_nasapolys_full(data.T, Tci, cp_over_R[0], h_over_RT[0], s_over_R[0], data.cp0_over_R[0], data.dhf_over_R[0], data.s0_over_R[0])
     return coeffs_lo, coeffs_hi
 
 

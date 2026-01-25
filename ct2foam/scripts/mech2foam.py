@@ -20,7 +20,7 @@ def main():
         description='Convert/refit cantera-based transport and thermodynamic data into OpenFOAM format.')
     parser.add_argument(
         '-i', '--input', type=str,
-        help='Mechanism (.cti/.yaml/.xml) file path.', default=None,
+        help='Mechanism (.yaml/.yaml/.xml) file path.', default=None,
         required=True)
     parser.add_argument(
         '-o', '--output', type=str,

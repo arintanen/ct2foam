@@ -50,7 +50,7 @@ class ctThermoTransport:
     def get_thermo_fit_type(self, species_name):
         """
         species_name: species name
-        return: - type_name = [NasaPoly2 (NASA7), Nasa9PolyMultiTempRegion (NASA9), Shomate], 
+        return: - type_name = [NasaPoly2 (NASA7), Nasa9PolyMultiTempRegion (NASA9), Shomate],
         """
         i = self.gas.species_index(species_name)
         type_name = type(self.gas.species(i).thermo).__name__
@@ -84,13 +84,13 @@ class ctThermoTransport:
         gas = ct.Solution(self.mechanismFile)
         p0 = ct.one_atm     # - not utilised
         gas.TP = 300.0, p0  # - not utilised
-        gas.transport_model = 'Multi'
+        gas.transport_model = 'multicomponent'
 
         if(self.verbose):
             print("Evaluating thermophysical properties over species.")
 
         for sp_i in gas.species_names:
-            
+
             self.check_temperature_limits(sp_i)
 
             reactants = sp_i + ':1.0'
@@ -125,8 +125,8 @@ class ctThermoTransport:
         # Initialise a free flame object
         gas = ct.Solution(self.mechanismFile)
         p0 = ct.one_atm     # - not utilised
-        gas.TPX = 300.0, p0, X 
-        gas.transport_model = 'Multi'
+        gas.TPX = 300.0, p0, X
+        gas.transport_model = 'multicomponent'
 
         # return 2d arrays to be consistent with the full set of species
         mu = np.atleast_2d(np.zeros(len(self.T)))
@@ -141,7 +141,7 @@ class ctThermoTransport:
 
         # standard property, potentially required in cp re-fitting
         gas0 = ct.Solution(self.mechanismFile)
-        gas0.TPX = self.T_std, p0, X 
+        gas0.TPX = self.T_std, p0, X
         cp0_over_R = np.atleast_1d(gas0.cp_mole/ct.gas_constant)
         dhf_over_R = np.atleast_1d(gas0.enthalpy_mole/ct.gas_constant)
         s0_over_R = np.atleast_1d(gas0.entropy_mole/ct.gas_constant)
@@ -162,6 +162,7 @@ class ctThermoTransport:
             cv_mole[0][i] = gas.cv_mole
 
         #override the class initialisation
+        # TODO: Mixture should be a separate class to avoid inconsistent definitions.
         self.W          = W
         self.names      = [mixture_name]
         self.mu = mu
@@ -173,7 +174,7 @@ class ctThermoTransport:
         self.cp0_over_R = cp0_over_R
         self.dhf_over_R = dhf_over_R
         self.s0_over_R = s0_over_R
-        
+
         return 0
 
 
@@ -191,4 +192,3 @@ class ctThermoTransport:
                 print("\t" + species_name + ": Warning, given min(T)=" + str(minT_user) +  "K is out of original bounds. (" + str(minT_ref) + 'K)' )
             if( maxT_ref < maxT_user ):
                 print("\t" + species_name + ": Warning, given max(T)=" + str(maxT_user) +  "K is out of original bounds. (" + str(maxT_ref) + 'K)' )
-

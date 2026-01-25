@@ -17,7 +17,7 @@ def init_dirs(output_dir=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Convert/refit cantera .cti -based transport and thermodynamic data into OpenFOAM format.')
+        description='Convert/refit cantera .yaml -based transport and thermodynamic data into OpenFOAM format.')
     parser.add_argument('-i', '--input', type=str,
                         help='Mechanism path.', default=None, required=True)
     parser.add_argument(
