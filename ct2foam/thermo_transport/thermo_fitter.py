@@ -1,3 +1,4 @@
+from typing import Union
 import numpy as np
 from . import lsqlin #3rd party matlab like lsqlin, providing better performance than scipy (in 2016)
 
@@ -147,6 +148,7 @@ def consistency(T, Tmid, c_lo, c_hi, cp_over_R, h_over_RT, s_over_R, abs_tol=1e-
     c_lo/c_hi: NASA 7 coefficients (low / high)
     return: Boolean
     """
+    # TODO: consider changing to the relative tolerance
     dcp = np.abs(cp_over_R - cp_nasa7(T, Tmid, c_lo, c_hi))
     err_cp = np.linalg.norm(dcp)
     dh = np.abs(h_over_RT - h_nasa7(T, Tmid, c_lo, c_hi))
@@ -224,7 +226,7 @@ def correct_coeffs(coeffs: np.ndarray, Tcommon: float, dhf_over_R: float, s0_ove
     return coeffs
 
 
-def fit_nasapolys_cp(T0: np.ndarray, Tc_i: int, cp_over_R: np.ndarray, cp0_over_R: float, dhf_over_R: float, s0_over_R: float, verbose=False):
+def fit_nasapolys_cp(T0: np.ndarray, Tc_i: int | np.signedinteger, cp_over_R: np.ndarray, cp0_over_R: float, dhf_over_R: float, s0_over_R: float, verbose=False):
     """
     See the notes at the top of this file.
     Fit the specific heat only and use the analytical integration to obtain the additional coefficients for entropy and enthalpy.
@@ -311,7 +313,7 @@ def fit_nasapolys_cp(T0: np.ndarray, Tc_i: int, cp_over_R: np.ndarray, cp0_over_
     return coeffs_lo, coeffs_hi
 
 
-def fit_nasapolys_full(T0: np.ndarray, Tc_i: int, cp_over_R: np.ndarray, h_over_RT: np.ndarray, s_over_R: np.ndarray, cp0_over_R: float, dhf_over_R: float, s0_over_R: float, verbose=False):
+def fit_nasapolys_full(T0: np.ndarray, Tc_i: int | np.signedinteger, cp_over_R: np.ndarray, h_over_RT: np.ndarray, s_over_R: np.ndarray, cp0_over_R: float, dhf_over_R: float, s0_over_R: float, verbose=False):
     """
     See the notes at the top of this file.
     Original data from low-quality fit or from experiments:

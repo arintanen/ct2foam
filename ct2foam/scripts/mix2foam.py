@@ -14,7 +14,7 @@ def init_dirs(output_dir=None):
     output_dir.mkdir(exist_ok=True)
     return output_dir
 
-
+# TODO: replace by mech2foam with mixture argument to avoid duplicate code.
 def main():
     parser = argparse.ArgumentParser(
         description='Convert/refit cantera .yaml -based transport and thermodynamic data into OpenFOAM format.')
