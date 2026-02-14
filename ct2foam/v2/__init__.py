@@ -3,6 +3,7 @@
 from .coefficients import NASA7Polynomial, Sutherland, Polynomial
 from .species_dataset import SpeciesDataset
 from .mechanism_dataset import MechanismDataset
+from .fitting_tolerances import FittingTolerances
 
 __all__ = [
     "NASA7Polynomial",
@@ -10,4 +11,5 @@ __all__ = [
     "Polynomial",
     "SpeciesDataset",
     "MechanismDataset",
+    "FittingTolerances",
 ]

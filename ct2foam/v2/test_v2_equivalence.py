@@ -2,7 +2,6 @@
 
 import unittest
 import numpy as np
-import cantera as ct
 
 from ct2foam.thermo_transport.ct_properties import ctThermoTransport
 from ct2foam.thermo_transport import ct2foam_utils as old_utils
@@ -16,8 +15,8 @@ THIGH = 3000.0
 T_EVAL = np.linspace(300, 3000, 128)
 
 # Tolerance for numerical equivalence
-ABS_TOL = 1e-10  # Absolute tolerance for coefficient comparison
-REL_TOL = 1e-8  # Relative tolerance for array comparison
+ABS_TOL = 1e-30  # Absolute tolerance for coefficient comparison
+REL_TOL = 1e-15  # Relative tolerance for array comparison
 
 
 class TestV2OldEquivalence(unittest.TestCase):
@@ -90,13 +89,11 @@ class TestV2OldEquivalence(unittest.TestCase):
         )
 
     def test_nasa7_coefficients_equivalence(self):
-        """NASA7 coefficients should match between old and new for all species.
+        """NASA7 coefficients should match exactly between old and new for all species.
 
-        NOTE: The old implementation reuses original Cantera coefficients when they
-        are continuous and have matching Tmid. The new implementation always refits.
-        Since GRI-3.0 has Tmid=1000.0 matching our choice, old implementation reuses
-        those coefficients. This test checks that both produce good fits, not identical
-        coefficients.
+        Both implementations now reuse Cantera coefficients when they are continuous
+        and have matching Tmid. Since GRI-3.0 has Tmid=1000.0 matching our choice,
+        both should reuse the same coefficients.
         """
         failures = []
 
@@ -110,50 +107,25 @@ class TestV2OldEquivalence(unittest.TestCase):
                 f"Species {sp_name} has no nasa7 fit in new implementation",
             )
 
-            # Instead of comparing coefficients directly, compare fit quality
-            # by evaluating at test points
-            T_test = np.linspace(400, 2500, 50)
+            # Compare coefficients directly (should be identical now)
+            old_c_lo = self.old_nasa_lo[i, :]
+            old_c_hi = self.old_nasa_hi[i, :]
+            new_c_lo = sd_new.nasa7.coeffs_low
+            new_c_hi = sd_new.nasa7.coeffs_high
 
-            # Old implementation evaluation
-            from ct2foam.thermo_transport import thermo_fitter as th_fitter
+            # Check exact match with tight tolerances
+            c_lo_close = np.allclose(old_c_lo, new_c_lo, atol=ABS_TOL, rtol=REL_TOL)
+            c_hi_close = np.allclose(old_c_hi, new_c_hi, atol=ABS_TOL, rtol=REL_TOL)
 
-            old_cp = th_fitter.cp_nasa7(
-                T_test, TMID, self.old_nasa_lo[i, :], self.old_nasa_hi[i, :]
-            )
-            old_h = th_fitter.h_nasa7(
-                T_test, TMID, self.old_nasa_lo[i, :], self.old_nasa_hi[i, :]
-            )
-            old_s = th_fitter.s_nasa7(
-                T_test, TMID, self.old_nasa_lo[i, :], self.old_nasa_hi[i, :]
-            )
-
-            # New implementation evaluation
-            new_cp = sd_new.nasa7.cp_over_R(T_test)
-            new_h = sd_new.nasa7.h_over_RT(T_test)
-            new_s = sd_new.nasa7.s_over_R(T_test)
-
-            print(old_cp)
-            print(new_cp)
-            print(sd_new.cp / ct.gas_constant)
-
-            # Check that both produce similar results (within 10% tolerance for h)
-            cp_close = np.allclose(old_cp, new_cp, atol=1e-13, rtol=1e-15)
-            h_close = np.allclose(old_h, new_h, atol=1e-3, rtol=0.10)
-            s_close = np.allclose(old_s, new_s, atol=1e-4, rtol=0.05)
-
-            if not (cp_close and h_close and s_close):
-                cp_err = np.max(np.abs(old_cp - new_cp) / np.abs(old_cp + 1e-10))
-                h_err = np.max(np.abs(old_h - new_h) / np.abs(old_h + 1e-10))
-                s_err = np.max(np.abs(old_s - new_s) / np.abs(old_s + 1e-10))
+            if not (c_lo_close and c_hi_close):
+                c_lo_err = np.max(np.abs(old_c_lo - new_c_lo))
+                c_hi_err = np.max(np.abs(old_c_hi - new_c_hi))
                 failures.append(
-                    f"{sp_name}: cp_rel={cp_err:.2e}, h_rel={h_err:.2e}, s_rel={s_err:.2e}"
+                    f"{sp_name}: c_lo_err={c_lo_err:.2e}, c_hi_err={c_hi_err:.2e}"
                 )
 
         if failures:
-            self.fail(
-                f"NASA7 fit quality mismatches (cp/s >5%, h >10% rel error):\n"
-                + "\n".join(failures[:10])
-            )
+            self.fail(f"NASA7 coefficient mismatches:\n" + "\n".join(failures[:10]))
 
     def test_sutherland_coefficients_equivalence(self):
         """Sutherland As and Ts should match between old and new for all species."""
@@ -399,6 +371,27 @@ class TestV2OldEquivalence(unittest.TestCase):
             self.fail(
                 f"Polynomial mu evaluation mismatches:\n" + "\n".join(failures[:10])
             )
+
+    def test_cantera_coefficients_reused_when_valid(self):
+        """Verify that valid Cantera coefficients are reused, not refitted."""
+        # Check that the new implementation reports high reuse rate
+        total_species = len(self.new_mech.species_datasets)
+        reused_count = self.fit_result["reused"]
+        reuse_percent = 100 * reused_count / total_species
+
+        # GRI-3.0 with Tmid=1000.0 should have very high reuse rate (>90%)
+        # because most species have continuous NASA7 coefficients at that Tmid
+        self.assertGreater(
+            reuse_percent,
+            90.0,
+            f"Expected >90% reuse rate for GRI-3.0, got {reuse_percent:.1f}% "
+            f"({reused_count}/{total_species})",
+        )
+
+        print(
+            f"\nReuse statistics: {reused_count}/{total_species} species "
+            f"({reuse_percent:.1f}%) reused Cantera coefficients"
+        )
 
 
 if __name__ == "__main__":

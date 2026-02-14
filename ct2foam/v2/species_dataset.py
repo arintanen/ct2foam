@@ -9,10 +9,12 @@ from .coefficients import NASA7Polynomial, Sutherland, Polynomial
 
 _T_STD = 298.15
 
+
 # TODO: potentially rename something like: speciesDataFitter???
 class SpeciesDataset:
     """One instance per species/mixture; holds data and fitting results."""
 
+    # TODO: add notes that this can be used with numerical or experimental data.
     def __init__(
         self,
         name,
@@ -29,6 +31,8 @@ class SpeciesDataset:
         W=None,
         cv_mole=None,
         elements=None,
+        cantera_nasa7=None,
+        is_nasa7=True,
     ):
         self.name = str(name)
         self.T = np.asarray(T, dtype=float)
@@ -44,7 +48,8 @@ class SpeciesDataset:
         self.W = float(W) if W is not None else None
         self.cv_mole = np.asarray(cv_mole, dtype=float) if cv_mole is not None else None
         self.elements = elements
-        self.gas_constant = ct.gas_constant
+        self.cantera_nasa7 = cantera_nasa7 # TODO: rename
+        self.is_nasa7 = is_nasa7
         # Fitting results (populated by fit methods)
         self.nasa7 = None
         self.sutherland = None
@@ -56,11 +61,38 @@ class SpeciesDataset:
     #  Thermo fitting (embedded from thermo_fitter.py)
     # ------------------------------------------------------------------ #
 
-    def fit_thermo(self, strategy="auto"):
-        """Fit NASA7 polynomials; returns and stores a NASA7Polynomial object."""
-        # TODO: check what should be used????
-        # R_gas = 8314.46261815324  # same constant used in existing code for error calc
-        R_gas = self.gas_constant
+    def fit_thermo(
+        self, strategy="auto", tolerances=None, force_refit=False, verbose=False
+    ):
+        """Fit NASA7 polynomials with smart reuse of Cantera coefficients.
+
+        Logic:
+        1. If cantera_nasa7 available and not force_refit:
+           - Check consistency (must pass or raise RuntimeError)
+           - Check continuity AND Tmid match → REUSE
+           - Check continuity but Tmid differs → cp_only refit
+           - Not continuous → full refit
+        2. If non-NASA7 format: print warning, use full refit
+        3. Otherwise: fit based on strategy
+
+        Args:
+            strategy: 'auto', 'cp_only', or 'full'
+            tolerances: FittingTolerances instance (defaults to default())
+            force_refit: If True, skip Cantera coefficient reuse check
+            verbose: If True, print fitting decisions
+
+        Returns:
+            NASA7Polynomial object
+
+        Raises:
+            RuntimeError: If Cantera coefficients fail consistency check
+        """
+        if tolerances is None:
+            from .fitting_tolerances import FittingTolerances
+
+            tolerances = FittingTolerances.default()
+
+        R_gas = ct.gas_constant
         T = self.T
         Tc_i = int(np.argmin(np.abs(T - self.Tmid)))
 
@@ -68,8 +100,76 @@ class SpeciesDataset:
         h_over_RT = self.h / (R_gas * T)
         s_over_R = self.s / R_gas
 
-        # TODO: Here you should have nasa9 check?
+        # ===== STEP 1: Check if can reuse Cantera coefficients =====
+        # Only check for reuse if strategy is "auto" (default behavior)
+        if (
+            strategy == "auto"
+            and not force_refit
+            and self.is_nasa7
+            and self.cantera_nasa7 is not None
+        ):
+            ct_nasa = self.cantera_nasa7
 
+            # Check 1: Consistency (MUST PASS or raise error)
+            consistency = ct_nasa.check_consistency(
+                T,
+                cp_over_R,
+                h_over_RT,
+                s_over_R,
+                abs_tol=tolerances.consistency_abs_tol,
+            )
+
+            if not consistency["is_consistent"]:
+                raise RuntimeError(
+                    f"Species {self.name}: Cantera NASA7 coefficients are INCONSISTENT "
+                    f"with evaluated thermodynamic data. This indicates a problem with the "
+                    f"mechanism file. Errors: cp={consistency['cp_error']:.2e}, "
+                    f"h={consistency['h_error']:.2e}, s={consistency['s_error']:.2e}"
+                )
+
+            # Check 2: Continuity
+            continuity = ct_nasa.check_continuity(
+                cp_tol=tolerances.continuity_cp_tol,
+                cpdT_tol=tolerances.continuity_cpdT_tol,
+                h_tol=tolerances.continuity_h_tol,
+                s_tol=tolerances.continuity_s_tol,
+            )
+
+            is_continuous = continuity["is_continuous"]
+
+            # Check 3: Tmid match
+            tmid_matches = (
+                abs(ct_nasa.Tmid - self.Tmid) / self.Tmid < tolerances.tmid_rel_tol
+            )
+
+            # Decide: reuse, cp_only, or full refit
+            if is_continuous and tmid_matches:
+                # REUSE: Cantera coefficients are perfect
+                if verbose:
+                    print(f"{self.name}: Reusing Cantera NASA7 coefficients")
+                self.nasa7 = ct_nasa
+                return ct_nasa
+            elif is_continuous:
+                # cp-only refit (continuous but different Tmid)
+                if verbose:
+                    print(
+                        f"{self.name}: Refitting (Tmid differs: {ct_nasa.Tmid:.1f} → {self.Tmid:.1f})"
+                    )
+                strategy = "cp_only"
+            else:
+                # Full refit (not continuous)
+                if verbose:
+                    print(f"{self.name}: Refitting (discontinuous at Tmid)")
+                strategy = "full"
+
+        # ===== STEP 2: Handle non-NASA7 formats =====
+        if not self.is_nasa7:
+            print(
+                f"Warning: Species {self.name} has non-NASA7 thermo format. Using full refit."
+            )
+            strategy = "full"
+
+        # ===== STEP 3: Perform fitting based on strategy =====
         if strategy == "auto":
             # Try cp-only first; fall back to full if consistency fails
             try:
@@ -81,11 +181,15 @@ class SpeciesDataset:
                     T, cp_over_R, h_over_RT, s_over_R, abs_tol=0.1
                 )
                 if result["is_consistent"]:
+                    if verbose:
+                        print(f"{self.name}: Fitted (cp-only strategy)")
                     self.nasa7 = nasa
                     return nasa
             except Exception:
                 pass
             # Full fit
+            if verbose:
+                print(f"{self.name}: Fitting (full strategy, cp-only failed)")
             c_lo, c_hi = self._fit_nasapolys_full(
                 T,
                 Tc_i,
@@ -97,10 +201,14 @@ class SpeciesDataset:
                 self.s0_over_R,
             )
         elif strategy == "cp_only":
+            if verbose:
+                print(f"{self.name}: Fitting (cp-only strategy)")
             c_lo, c_hi = self._fit_nasapolys_cp(
                 T, Tc_i, cp_over_R, self.cp0_over_R, self.dhf_over_R, self.s0_over_R
             )
         elif strategy == "full":
+            if verbose:
+                print(f"{self.name}: Fitting (full strategy)")
             c_lo, c_hi = self._fit_nasapolys_full(
                 T,
                 Tc_i,
@@ -191,7 +299,8 @@ class SpeciesDataset:
         """Check NASA7 fit quality; returns and stores quality dict."""
         if self.nasa7 is None:
             raise RuntimeError("fit_thermo() must be called before check_quality()")
-        R_gas = 8314.46261815324
+        # R_gas = 8314.46261815324
+        R_gas = ct.gas_constant
         T = self.T
         cp_over_R = self.cp / R_gas
         h_over_RT = self.h / (R_gas * T)

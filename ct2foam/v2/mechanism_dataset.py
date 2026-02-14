@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 
 from .species_dataset import SpeciesDataset
+from .coefficients import NASA7Polynomial
 from ct2foam.thermo_transport import foam_writer as writer
 
 
@@ -25,11 +26,11 @@ class MechanismDataset:
         import cantera as ct
 
         gas = ct.Solution(str(mech_file))
-        R = ct.gas_constant # TODO:this must be consistent with old?
+        R = ct.gas_constant  # TODO:this must be consistent with old?
         p0 = ct.one_atm
 
         if Tlow is None:
-            Tlow = 200.0 # TODO: check limits
+            Tlow = 200.0  # TODO: check limits
         if Thigh is None:
             Thigh = 5000.0
         if T_eval is None:
@@ -48,7 +49,21 @@ class MechanismDataset:
 
         for sp_name in gas.species_names:
             i = gas.species_index(sp_name)
+            sp_obj = gas.species(i)
             reactants = sp_name + ":1.0"
+
+            # Check thermo format and extract Cantera NASA7 coefficients
+            thermo_type = type(sp_obj.thermo).__name__
+            is_nasa7 = thermo_type == "NasaPoly2"
+            cantera_nasa7 = None
+
+            if is_nasa7:
+                # Extract coefficients: [Tmid, c_hi[0..6], c_lo[0..6]]
+                coeffs = sp_obj.thermo.coeffs
+                ct_Tmid = float(coeffs[0])
+                ct_c_hi = np.array(coeffs[1:8])
+                ct_c_lo = np.array(coeffs[8:15])
+                cantera_nasa7 = NASA7Polynomial(ct_c_lo, ct_c_hi, ct_Tmid)
 
             mu_arr = np.zeros(nT)
             kappa_arr = np.zeros(nT)
@@ -93,15 +108,27 @@ class MechanismDataset:
                 W=gas.molecular_weights[i],
                 cv_mole=cv_arr,
                 elements=elements,
+                cantera_nasa7=cantera_nasa7,
+                is_nasa7=is_nasa7,
             )
             species_datasets.append(sd)
 
         return cls(species_datasets, str(mech_file), Tmid, T_eval[0], T_eval[-1])
 
-    def fit_all(self, verbose=True):
-        """Fit thermo and transport for all species; log errors and continue."""
+    def fit_all(self, verbose=True, tolerances=None, force_refit=False):
+        """Fit thermo and transport for all species; log errors and continue.
+
+        Args:
+            verbose: If True, print fitting messages
+            tolerances: FittingTolerances instance
+            force_refit: If True, skip Cantera coefficient reuse
+
+        Returns:
+            dict with keys: 'succeeded', 'failed', 'reused', 'details'
+        """
         succeeded = 0
         failed = 0
+        reused = 0
         details = {}
 
         for sd in self.species_datasets:
@@ -110,10 +137,26 @@ class MechanismDataset:
                 "transport": None,
                 "quality": None,
                 "error": None,
+                "reused": False,
             }
             try:
-                sd.fit_thermo()
+                # Track if Cantera coefficients were available
+                had_cantera_coeffs = (
+                    sd.cantera_nasa7 is not None and sd.is_nasa7 and not force_refit
+                )
+
+                # Fit thermo
+                sd.fit_thermo(
+                    tolerances=tolerances, force_refit=force_refit, verbose=verbose
+                )
                 sp_detail["thermo"] = "ok"
+
+                # Check if reused (Tmid will match Cantera's if reused)
+                if had_cantera_coeffs and sd.cantera_nasa7 is not None:
+                    ct_Tmid = sd.cantera_nasa7.Tmid
+                    if abs(sd.nasa7.Tmid - ct_Tmid) < 1e-12:
+                        reused += 1
+                        sp_detail["reused"] = True
 
                 sd.fit_transport()
                 sp_detail["transport"] = "ok"
@@ -123,7 +166,7 @@ class MechanismDataset:
 
                 succeeded += 1
                 self.fit_log.append(f"{sd.name}: fit OK")
-                # TODO: Does this need to be in try or should it be just crash and error message?
+
             except Exception as e:
                 failed += 1
                 msg = (
@@ -138,7 +181,12 @@ class MechanismDataset:
 
             details[sd.name] = sp_detail
 
-        return {"succeeded": succeeded, "failed": failed, "details": details}
+        return {
+            "succeeded": succeeded,
+            "failed": failed,
+            "reused": reused,
+            "details": details,
+        }
 
     def print_fit_summary(self):
         """Print a summary of the fitting process."""

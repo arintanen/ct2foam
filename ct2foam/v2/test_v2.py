@@ -7,11 +7,12 @@ from pathlib import Path
 from ct2foam.v2.coefficients import NASA7Polynomial, Sutherland, Polynomial
 from ct2foam.v2.species_dataset import SpeciesDataset
 from ct2foam.v2.mechanism_dataset import MechanismDataset
+from ct2foam.v2.fitting_tolerances import FittingTolerances
 
 # Note, OF_reference/Test-thermoMixture.C
 # is used as a source of the reference data tested here.
 
-#R = 8314.46261815324
+# R = 8314.46261815324
 R = 8314.47006650545  # taken from openFoam -- differs slightly from standards
 
 T_STD = 298.15
@@ -27,9 +28,9 @@ H2O_C_HI = np.array(
 
 class TestNASA7Polynomial(unittest.TestCase):
     """Test NASA polynomials and related functionalities."""
+
     def setUp(self):
         self.nasa = NASA7Polynomial(H2O_C_LO, H2O_C_HI, H2O_TMID)
-
 
     def test_cp_over_R_below_midpoint(self):
         """cp/R uses low coefficients when T <= Tmid."""
@@ -218,7 +219,6 @@ class TestSutherland(unittest.TestCase):
         self.assertTrue(np.abs(kappa - kappa_foam) < 1e-12)
 
 
-
 class TestPolynomial(unittest.TestCase):
     """Test Polynomial transport class."""
 
@@ -369,7 +369,6 @@ class TestSpeciesDatasetFitting(unittest.TestCase):
         sd.fit_transport()
         return sd
 
-
     def test_fit_thermo_returns_nasa7(self):
         """fit_thermo returns a NASA7Polynomial object."""
         sd = self._make_fitted_species("H2O")
@@ -412,7 +411,6 @@ class TestSpeciesDatasetFitting(unittest.TestCase):
         rel_err = np.linalg.norm(sd.cp - cp_fit) / np.linalg.norm(sd.cp)
         self.assertLess(rel_err, 5e-4)
 
-
     def test_fit_thermo_ar_monatomic(self):
         """Fitting works for monatomic Ar species."""
         sd = self._make_fitted_species("AR")
@@ -420,7 +418,6 @@ class TestSpeciesDatasetFitting(unittest.TestCase):
         cp_fit = sd.nasa7.cp_over_R(sd.T) * R
         rel_err = np.linalg.norm(sd.cp - cp_fit) / np.linalg.norm(sd.cp)
         self.assertLess(rel_err, 1e-6)
-
 
     def test_fit_thermo_strategy_full(self):
         """Explicit 'full' strategy produces valid results."""
@@ -433,7 +430,6 @@ class TestSpeciesDatasetFitting(unittest.TestCase):
         rel_err = np.linalg.norm(sd.cp - cp_fit) / np.linalg.norm(sd.cp)
         self.assertLess(rel_err, 1e-3)
 
-
     def test_fit_thermo_strategy_cp_only(self):
         """Explicit 'cp_only' strategy produces valid results."""
         import copy
@@ -445,7 +441,6 @@ class TestSpeciesDatasetFitting(unittest.TestCase):
         rel_err = np.linalg.norm(sd.cp - cp_fit) / np.linalg.norm(sd.cp)
         self.assertLess(rel_err, 1e-5)
 
-
     def test_fit_thermo_invalid_strategy_raises(self):
         """Invalid strategy raises ValueError."""
         import copy
@@ -453,7 +448,6 @@ class TestSpeciesDatasetFitting(unittest.TestCase):
         sd = copy.deepcopy(self.species_data["H2O"])
         with self.assertRaises(ValueError):
             sd.fit_thermo(strategy="bogus")
-
 
     def test_fit_transport_returns_dict(self):
         """fit_transport returns a dict with expected keys."""
@@ -742,7 +736,7 @@ class TestMechanismDatasetErrorHandling(unittest.TestCase):
         result = mech.fit_all(verbose=False)
         # Should not crash and fitting of a zero array should be successfull
         self.assertEqual(result["failed"], 0)
-        self.assertEqual( result["succeeded"],2)
+        self.assertEqual(result["succeeded"], 2)
 
     def test_failed_species_logged(self):
         """Failed species should appear in failed_species dict."""
@@ -767,7 +761,7 @@ class TestMechanismDatasetErrorHandling(unittest.TestCase):
         mech = MechanismDataset([bad], "test", 1000.0, 300.0, 3000.0)
         result = mech.fit_all(verbose=False)
         self.assertIn("BAD_SP", mech.failed_species)
-        self.assertEqual(result["failed"],1)
+        self.assertEqual(result["failed"], 1)
 
     def test_error_message_contains_tune_tolerances(self):
         """Error message should contain 'tune your tolerances'."""
@@ -832,6 +826,520 @@ class TestMechanismDatasetErrorHandling(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError):
             sd.to_foam_dict()
+
+
+class TestNASA7ReuseLogic(unittest.TestCase):
+    """Test smart reuse of Cantera NASA7 coefficients."""
+
+    def test_reuses_cantera_coeffs_when_valid(self):
+        """Reuse Cantera coefficients when continuous, consistent, and Tmid matches."""
+        import cantera as ct
+
+        # Load H2O from h2o2 mechanism
+        gas = ct.Solution("h2o2.yaml")
+        Tmid = 1000.0
+        T = np.linspace(300, 3000, 50)
+
+        # Ensure Tmid is in T array
+        if Tmid not in T:
+            T = np.sort(np.append(T, Tmid))
+
+        i = gas.species_index("H2O")
+        sp_obj = gas.species(i)
+
+        # Extract Cantera NASA7 coefficients
+        coeffs = sp_obj.thermo.coeffs
+        ct_Tmid = float(coeffs[0])
+        ct_c_hi = np.array(coeffs[1:8])
+        ct_c_lo = np.array(coeffs[8:15])
+        cantera_nasa7 = NASA7Polynomial(ct_c_lo, ct_c_hi, ct_Tmid)
+
+        # Evaluate data
+        R = ct.gas_constant
+        p0 = ct.one_atm
+        cp_arr = np.zeros(len(T))
+        h_arr = np.zeros(len(T))
+        s_arr = np.zeros(len(T))
+        mu_arr = np.zeros(len(T))
+        kappa_arr = np.zeros(len(T))
+
+        for j, Tj in enumerate(T):
+            gas.TPX = Tj, p0, "H2O:1.0"
+            cp_arr[j] = gas.cp_mole
+            h_arr[j] = gas.enthalpy_mole
+            s_arr[j] = gas.entropy_mole
+            mu_arr[j] = gas.viscosity
+            kappa_arr[j] = gas.thermal_conductivity
+
+        cp0_over_R = sp_obj.thermo.cp(298.15) / R
+        dhf_over_R = sp_obj.thermo.h(298.15) / R
+        s0_over_R = sp_obj.thermo.s(298.15) / R
+
+        # Create SpeciesDataset with Cantera coefficients
+        sd = SpeciesDataset(
+            name="H2O",
+            T=T,
+            cp=cp_arr,
+            h=h_arr,
+            s=s_arr,
+            mu=mu_arr,
+            kappa=kappa_arr,
+            cp0_over_R=cp0_over_R,
+            dhf_over_R=dhf_over_R,
+            s0_over_R=s0_over_R,
+            Tmid=ct_Tmid,  # Use Cantera's Tmid
+            cantera_nasa7=cantera_nasa7,
+            is_nasa7=True,
+        )
+
+        # Fit with verbose to verify reuse message
+        result = sd.fit_thermo(verbose=False)
+
+        # Should return same object (reused)
+        self.assertIs(result, cantera_nasa7)
+        self.assertEqual(sd.nasa7.Tmid, ct_Tmid)
+
+    def test_refits_when_tmid_differs(self):
+        """Refit (cp-only) when continuous but Tmid differs."""
+        import cantera as ct
+
+        gas = ct.Solution("h2o2.yaml")
+        target_Tmid = 1200.0  # Different from Cantera's
+        T = np.linspace(300, 3000, 50)
+
+        if target_Tmid not in T:
+            T = np.sort(np.append(T, target_Tmid))
+
+        i = gas.species_index("H2")
+        sp_obj = gas.species(i)
+
+        # Extract Cantera NASA7 coefficients
+        coeffs = sp_obj.thermo.coeffs
+        ct_Tmid = float(coeffs[0])
+        ct_c_hi = np.array(coeffs[1:8])
+        ct_c_lo = np.array(coeffs[8:15])
+        cantera_nasa7 = NASA7Polynomial(ct_c_lo, ct_c_hi, ct_Tmid)
+
+        # Evaluate data
+        R = ct.gas_constant
+        p0 = ct.one_atm
+        cp_arr = np.zeros(len(T))
+        h_arr = np.zeros(len(T))
+        s_arr = np.zeros(len(T))
+        mu_arr = np.zeros(len(T))
+        kappa_arr = np.zeros(len(T))
+
+        for j, Tj in enumerate(T):
+            gas.TPX = Tj, p0, "H2:1.0"
+            cp_arr[j] = gas.cp_mole
+            h_arr[j] = gas.enthalpy_mole
+            s_arr[j] = gas.entropy_mole
+            mu_arr[j] = gas.viscosity
+            kappa_arr[j] = gas.thermal_conductivity
+
+        cp0_over_R = sp_obj.thermo.cp(298.15) / R
+        dhf_over_R = sp_obj.thermo.h(298.15) / R
+        s0_over_R = sp_obj.thermo.s(298.15) / R
+
+        sd = SpeciesDataset(
+            name="H2",
+            T=T,
+            cp=cp_arr,
+            h=h_arr,
+            s=s_arr,
+            mu=mu_arr,
+            kappa=kappa_arr,
+            cp0_over_R=cp0_over_R,
+            dhf_over_R=dhf_over_R,
+            s0_over_R=s0_over_R,
+            Tmid=target_Tmid,  # Different Tmid
+            cantera_nasa7=cantera_nasa7,
+            is_nasa7=True,
+        )
+
+        result = sd.fit_thermo(verbose=False)
+
+        # Should refit with new Tmid
+        self.assertIsNot(result, cantera_nasa7)
+        self.assertEqual(sd.nasa7.Tmid, target_Tmid)
+        self.assertNotEqual(sd.nasa7.Tmid, ct_Tmid)
+
+    def test_force_refit_skips_cantera_coeffs(self):
+        """force_refit=True skips reuse check and always refits."""
+        import cantera as ct
+
+        gas = ct.Solution("h2o2.yaml")
+        Tmid = 1000.0
+        T = np.linspace(300, 3000, 50)
+
+        if Tmid not in T:
+            T = np.sort(np.append(T, Tmid))
+
+        i = gas.species_index("O2")
+        sp_obj = gas.species(i)
+
+        # Extract Cantera NASA7 coefficients
+        coeffs = sp_obj.thermo.coeffs
+        ct_Tmid = float(coeffs[0])
+        ct_c_hi = np.array(coeffs[1:8])
+        ct_c_lo = np.array(coeffs[8:15])
+        cantera_nasa7 = NASA7Polynomial(ct_c_lo, ct_c_hi, ct_Tmid)
+
+        # Evaluate data
+        R = ct.gas_constant
+        p0 = ct.one_atm
+        cp_arr = np.zeros(len(T))
+        h_arr = np.zeros(len(T))
+        s_arr = np.zeros(len(T))
+        mu_arr = np.zeros(len(T))
+        kappa_arr = np.zeros(len(T))
+
+        for j, Tj in enumerate(T):
+            gas.TPX = Tj, p0, "O2:1.0"
+            cp_arr[j] = gas.cp_mole
+            h_arr[j] = gas.enthalpy_mole
+            s_arr[j] = gas.entropy_mole
+            mu_arr[j] = gas.viscosity
+            kappa_arr[j] = gas.thermal_conductivity
+
+        cp0_over_R = sp_obj.thermo.cp(298.15) / R
+        dhf_over_R = sp_obj.thermo.h(298.15) / R
+        s0_over_R = sp_obj.thermo.s(298.15) / R
+
+        sd = SpeciesDataset(
+            name="O2",
+            T=T,
+            cp=cp_arr,
+            h=h_arr,
+            s=s_arr,
+            mu=mu_arr,
+            kappa=kappa_arr,
+            cp0_over_R=cp0_over_R,
+            dhf_over_R=dhf_over_R,
+            s0_over_R=s0_over_R,
+            Tmid=ct_Tmid,
+            cantera_nasa7=cantera_nasa7,
+            is_nasa7=True,
+        )
+
+        # Fit with force_refit=True
+        result = sd.fit_thermo(force_refit=True, verbose=False)
+
+        # Should NOT reuse (even though Tmid matches)
+        self.assertIsNot(result, cantera_nasa7)
+
+    def test_raises_on_inconsistent_cantera_coeffs(self):
+        """Raise RuntimeError when Cantera coefficients are inconsistent."""
+        T = np.linspace(300, 3000, 50)
+        Tmid = 1000.0
+
+        if Tmid not in T:
+            T = np.sort(np.append(T, Tmid))
+
+        # Create bad NASA7 coefficients (all zeros)
+        bad_coeffs_lo = np.zeros(7)
+        bad_coeffs_hi = np.zeros(7)
+        bad_nasa7 = NASA7Polynomial(bad_coeffs_lo, bad_coeffs_hi, Tmid)
+
+        # Create realistic data that won't match bad coefficients
+        cp_arr = 30000.0 * np.ones(len(T))  # J/kmol/K
+        h_arr = 30000.0 * T  # J/kmol
+        s_arr = 200000.0 * np.ones(len(T))  # J/kmol/K
+
+        sd = SpeciesDataset(
+            name="BAD",
+            T=T,
+            cp=cp_arr,
+            h=h_arr,
+            s=s_arr,
+            mu=np.ones(len(T)) * 1e-5,
+            kappa=np.ones(len(T)) * 0.02,
+            cp0_over_R=3.5,
+            dhf_over_R=0.0,
+            s0_over_R=20.0,
+            Tmid=Tmid,
+            cantera_nasa7=bad_nasa7,
+            is_nasa7=True,
+        )
+
+        # Should raise RuntimeError for inconsistent coefficients
+        with self.assertRaises(RuntimeError) as cm:
+            sd.fit_thermo(verbose=False)
+
+        self.assertIn("INCONSISTENT", str(cm.exception))
+        self.assertIn("BAD", str(cm.exception))
+
+    def test_custom_tolerances_accepted(self):
+        """Custom FittingTolerances are respected."""
+        import cantera as ct
+
+        gas = ct.Solution("h2o2.yaml")
+        Tmid = 1000.0
+        T = np.linspace(300, 3000, 50)
+
+        if Tmid not in T:
+            T = np.sort(np.append(T, Tmid))
+
+        i = gas.species_index("H2")
+        sp_obj = gas.species(i)
+
+        coeffs = sp_obj.thermo.coeffs
+        ct_Tmid = float(coeffs[0])
+        ct_c_hi = np.array(coeffs[1:8])
+        ct_c_lo = np.array(coeffs[8:15])
+        cantera_nasa7 = NASA7Polynomial(ct_c_lo, ct_c_hi, ct_Tmid)
+
+        # Evaluate data
+        R = ct.gas_constant
+        p0 = ct.one_atm
+        cp_arr = np.zeros(len(T))
+        h_arr = np.zeros(len(T))
+        s_arr = np.zeros(len(T))
+        mu_arr = np.zeros(len(T))
+        kappa_arr = np.zeros(len(T))
+
+        for j, Tj in enumerate(T):
+            gas.TPX = Tj, p0, "H2:1.0"
+            cp_arr[j] = gas.cp_mole
+            h_arr[j] = gas.enthalpy_mole
+            s_arr[j] = gas.entropy_mole
+            mu_arr[j] = gas.viscosity
+            kappa_arr[j] = gas.thermal_conductivity
+
+        cp0_over_R = sp_obj.thermo.cp(298.15) / R
+        dhf_over_R = sp_obj.thermo.h(298.15) / R
+        s0_over_R = sp_obj.thermo.s(298.15) / R
+
+        sd = SpeciesDataset(
+            name="H2",
+            T=T,
+            cp=cp_arr,
+            h=h_arr,
+            s=s_arr,
+            mu=mu_arr,
+            kappa=kappa_arr,
+            cp0_over_R=cp0_over_R,
+            dhf_over_R=dhf_over_R,
+            s0_over_R=s0_over_R,
+            Tmid=ct_Tmid,
+            cantera_nasa7=cantera_nasa7,
+            is_nasa7=True,
+        )
+
+        # Use custom strict tolerances
+        strict_tol = FittingTolerances.strict()
+        result = sd.fit_thermo(tolerances=strict_tol, verbose=False)
+
+        # Should still work with strict tolerances
+        self.assertIsNotNone(result)
+
+    def test_non_nasa7_format_triggers_warning(self):
+        """Non-NASA7 format prints warning and uses full refit."""
+        T = np.linspace(300, 3000, 50)
+        Tmid = 1000.0
+
+        if Tmid not in T:
+            T = np.sort(np.append(T, Tmid))
+
+        cp_arr = 30000.0 * np.ones(len(T))
+        h_arr = 30000.0 * T
+        s_arr = 200000.0 * np.ones(len(T))
+
+        sd = SpeciesDataset(
+            name="NASA9_SPECIES",
+            T=T,
+            cp=cp_arr,
+            h=h_arr,
+            s=s_arr,
+            mu=np.ones(len(T)) * 1e-5,
+            kappa=np.ones(len(T)) * 0.02,
+            cp0_over_R=3.5,
+            dhf_over_R=0.0,
+            s0_over_R=20.0,
+            Tmid=Tmid,
+            cantera_nasa7=None,
+            is_nasa7=False,  # Non-NASA7 format
+        )
+
+        # Capture stdout to verify warning
+        import io
+        import sys
+
+        captured = io.StringIO()
+        sys.stdout = captured
+
+        try:
+            result = sd.fit_thermo(verbose=False)
+            output = captured.getvalue()
+        finally:
+            sys.stdout = sys.__stdout__
+
+        # Should print warning
+        self.assertIn("Warning", output)
+        self.assertIn("non-NASA7", output)
+        self.assertIn("NASA9_SPECIES", output)
+
+        # Should still fit successfully
+        self.assertIsNotNone(result)
+
+    def test_verbose_parameter_prints_decisions(self):
+        """verbose=True prints fitting decisions."""
+        import cantera as ct
+
+        gas = ct.Solution("h2o2.yaml")
+        Tmid = 1000.0
+        T = np.linspace(300, 3000, 50)
+
+        if Tmid not in T:
+            T = np.sort(np.append(T, Tmid))
+
+        i = gas.species_index("H2O")
+        sp_obj = gas.species(i)
+
+        coeffs = sp_obj.thermo.coeffs
+        ct_Tmid = float(coeffs[0])
+        ct_c_hi = np.array(coeffs[1:8])
+        ct_c_lo = np.array(coeffs[8:15])
+        cantera_nasa7 = NASA7Polynomial(ct_c_lo, ct_c_hi, ct_Tmid)
+
+        # Evaluate data
+        R = ct.gas_constant
+        p0 = ct.one_atm
+        cp_arr = np.zeros(len(T))
+        h_arr = np.zeros(len(T))
+        s_arr = np.zeros(len(T))
+        mu_arr = np.zeros(len(T))
+        kappa_arr = np.zeros(len(T))
+
+        for j, Tj in enumerate(T):
+            gas.TPX = Tj, p0, "H2O:1.0"
+            cp_arr[j] = gas.cp_mole
+            h_arr[j] = gas.enthalpy_mole
+            s_arr[j] = gas.entropy_mole
+            mu_arr[j] = gas.viscosity
+            kappa_arr[j] = gas.thermal_conductivity
+
+        cp0_over_R = sp_obj.thermo.cp(298.15) / R
+        dhf_over_R = sp_obj.thermo.h(298.15) / R
+        s0_over_R = sp_obj.thermo.s(298.15) / R
+
+        sd = SpeciesDataset(
+            name="H2O",
+            T=T,
+            cp=cp_arr,
+            h=h_arr,
+            s=s_arr,
+            mu=mu_arr,
+            kappa=kappa_arr,
+            cp0_over_R=cp0_over_R,
+            dhf_over_R=dhf_over_R,
+            s0_over_R=s0_over_R,
+            Tmid=ct_Tmid,
+            cantera_nasa7=cantera_nasa7,
+            is_nasa7=True,
+        )
+
+        # Capture stdout
+        import io
+        import sys
+
+        captured = io.StringIO()
+        sys.stdout = captured
+
+        try:
+            sd.fit_thermo(verbose=True)
+            output = captured.getvalue()
+        finally:
+            sys.stdout = sys.__stdout__
+
+        # Should print decision message
+        self.assertIn("H2O", output)
+        self.assertTrue(
+            "Reusing" in output or "Fitting" in output or "Refitting" in output
+        )
+
+    def test_reuse_count_in_fit_all_result(self):
+        """fit_all() returns reuse count in result dict."""
+        mech = MechanismDataset.from_cantera("h2o2.yaml", Tmid=1000.0)
+        result = mech.fit_all(verbose=False)
+
+        # Check that reused key exists
+        self.assertIn("reused", result)
+        self.assertIn("succeeded", result)
+        self.assertIn("failed", result)
+
+        # Reuse count should be >= 0 and <= total species
+        self.assertGreaterEqual(result["reused"], 0)
+        self.assertLessEqual(result["reused"], len(mech.species_datasets))
+
+        # For h2o2 mechanism with matching Tmid, should have high reuse rate
+        total = len(mech.species_datasets)
+        reuse_percent = 100 * result["reused"] / total if total > 0 else 0
+        # Expect at least 50% reuse for h2o2 mechanism
+        self.assertGreater(reuse_percent, 50.0)
+
+    def test_strategy_overrides_reuse_logic(self):
+        """Explicit strategy bypasses reuse logic."""
+        import cantera as ct
+
+        gas = ct.Solution("h2o2.yaml")
+        Tmid = 1000.0
+        T = np.linspace(300, 3000, 50)
+
+        if Tmid not in T:
+            T = np.sort(np.append(T, Tmid))
+
+        i = gas.species_index("H2")
+        sp_obj = gas.species(i)
+
+        coeffs = sp_obj.thermo.coeffs
+        ct_Tmid = float(coeffs[0])
+        ct_c_hi = np.array(coeffs[1:8])
+        ct_c_lo = np.array(coeffs[8:15])
+        cantera_nasa7 = NASA7Polynomial(ct_c_lo, ct_c_hi, ct_Tmid)
+
+        # Evaluate data
+        R = ct.gas_constant
+        p0 = ct.one_atm
+        cp_arr = np.zeros(len(T))
+        h_arr = np.zeros(len(T))
+        s_arr = np.zeros(len(T))
+        mu_arr = np.zeros(len(T))
+        kappa_arr = np.zeros(len(T))
+
+        for j, Tj in enumerate(T):
+            gas.TPX = Tj, p0, "H2:1.0"
+            cp_arr[j] = gas.cp_mole
+            h_arr[j] = gas.enthalpy_mole
+            s_arr[j] = gas.entropy_mole
+            mu_arr[j] = gas.viscosity
+            kappa_arr[j] = gas.thermal_conductivity
+
+        cp0_over_R = sp_obj.thermo.cp(298.15) / R
+        dhf_over_R = sp_obj.thermo.h(298.15) / R
+        s0_over_R = sp_obj.thermo.s(298.15) / R
+
+        sd = SpeciesDataset(
+            name="H2",
+            T=T,
+            cp=cp_arr,
+            h=h_arr,
+            s=s_arr,
+            mu=mu_arr,
+            kappa=kappa_arr,
+            cp0_over_R=cp0_over_R,
+            dhf_over_R=dhf_over_R,
+            s0_over_R=s0_over_R,
+            Tmid=ct_Tmid,
+            cantera_nasa7=cantera_nasa7,
+            is_nasa7=True,
+        )
+
+        # Use explicit strategy='full' (should skip reuse logic)
+        result = sd.fit_thermo(strategy="full", verbose=False)
+
+        # Should NOT reuse (even though Tmid matches and coeffs are valid)
+        self.assertIsNot(result, cantera_nasa7)
 
 
 if __name__ == "__main__":
