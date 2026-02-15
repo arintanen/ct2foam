@@ -5,7 +5,9 @@ from pathlib import Path
 import cantera as ct
 
 from .species import Species
-from .coefficients import NASA7Polynomial, Sutherland, Polynomial
+from .nasa7 import NASA7Polynomial
+from .sutherland import Sutherland
+from .polynomial import Polynomial
 from .fitting_tolerances import FittingTolerances
 from ct2foam.thermo_transport import foam_writer as writer
 

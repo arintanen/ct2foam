@@ -2,7 +2,9 @@
 
 import numpy as np
 import cantera as ct
-from .coefficients import NASA7Polynomial, Sutherland, Polynomial
+from .nasa7 import NASA7Polynomial
+from .sutherland import Sutherland
+from .polynomial import Polynomial
 
 
 class Species:
