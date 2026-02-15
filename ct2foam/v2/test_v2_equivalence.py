@@ -48,44 +48,41 @@ class TestV2OldEquivalence(unittest.TestCase):
 
         print(f"Loading {MECHANISM} with new implementation...")
         cls.new_mech = MechanismDataset.from_cantera(
-            MECHANISM, Tmid=TMID, Tlow=TLOW, Thigh=THIGH, T_eval=T_EVAL.copy()
+            MECHANISM,
+            Tmid=TMID,
+            Tlow=TLOW,
+            Thigh=THIGH,
+            T_eval=T_EVAL.copy(),
+            verbose=False,
         )
-
-        print("Fitting thermo and transport with new implementation...")
-        result = cls.new_mech.fit_all(verbose=False)
-        cls.fit_result = result
 
         print(f"Old: {cls.old_data.gas.n_species} species")
-        print(f"New: {len(cls.new_mech.species_datasets)} species")
-        print(
-            f"New fit result: {result['succeeded']} succeeded, {result['failed']} failed"
-        )
+        print(f"New: {len(cls.new_mech.species_list)} species")
 
     def _get_species_by_name(self, name):
-        """Get new implementation SpeciesDataset by name."""
-        for sd in self.new_mech.species_datasets:
-            if sd.name == name:
-                return sd
+        """Get new implementation Species by name."""
+        for sp in self.new_mech.species_list:
+            if sp.name == name:
+                return sp
         return None
 
     def test_species_count_match(self):
         """Both implementations should have the same number of species."""
-        self.assertEqual(
-            self.old_data.gas.n_species, len(self.new_mech.species_datasets)
-        )
+        self.assertEqual(self.old_data.gas.n_species, len(self.new_mech.species_list))
 
     def test_species_names_match(self):
         """Species names should match between implementations."""
         old_names = set(self.old_data.names)
-        new_names = set([sd.name for sd in self.new_mech.species_datasets])
+        new_names = set([sp.name for sp in self.new_mech.species_list])
         self.assertEqual(old_names, new_names)
 
     def test_all_species_fitted_successfully(self):
         """All species should fit successfully in new implementation."""
+        failed_count = len(self.new_mech.failed_species)
         self.assertEqual(
-            self.fit_result["failed"],
+            failed_count,
             0,
-            f"New implementation failed on {self.fit_result['failed']} species",
+            f"New implementation failed on {failed_count} species: {list(self.new_mech.failed_species.keys())}",
         )
 
     def test_nasa7_coefficients_equivalence(self):
@@ -98,20 +95,20 @@ class TestV2OldEquivalence(unittest.TestCase):
         failures = []
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
             self.assertIsNotNone(
-                sd_new, f"Species {sp_name} not found in new implementation"
+                sp, f"Species {sp_name} not found in new implementation"
             )
             self.assertIsNotNone(
-                sd_new.nasa7,
+                sp.nasa7,
                 f"Species {sp_name} has no nasa7 fit in new implementation",
             )
 
             # Compare coefficients directly (should be identical now)
             old_c_lo = self.old_nasa_lo[i, :]
             old_c_hi = self.old_nasa_hi[i, :]
-            new_c_lo = sd_new.nasa7.coeffs_low
-            new_c_hi = sd_new.nasa7.coeffs_high
+            new_c_lo = sp.nasa7.coeffs_low
+            new_c_hi = sp.nasa7.coeffs_high
 
             # Check exact match with tight tolerances
             c_lo_close = np.allclose(old_c_lo, new_c_lo, atol=ABS_TOL, rtol=REL_TOL)
@@ -132,15 +129,15 @@ class TestV2OldEquivalence(unittest.TestCase):
         failures = []
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
             self.assertIsNotNone(
-                sd_new.sutherland, f"Species {sp_name} has no sutherland fit"
+                sp.sutherland, f"Species {sp_name} has no sutherland fit"
             )
 
             old_As = self.old_As[i]
             old_Ts = self.old_Ts[i]
-            new_As = sd_new.sutherland.As
-            new_Ts = sd_new.sutherland.Ts
+            new_As = sp.sutherland.As
+            new_Ts = sp.sutherland.Ts
 
             As_close = np.isclose(old_As, new_As, atol=ABS_TOL, rtol=REL_TOL)
             Ts_close = np.isclose(old_Ts, new_Ts, atol=ABS_TOL, rtol=REL_TOL)
@@ -162,15 +159,15 @@ class TestV2OldEquivalence(unittest.TestCase):
         failures = []
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
             self.assertIsNotNone(
-                sd_new.polynomial, f"Species {sp_name} has no polynomial fit"
+                sp.polynomial, f"Species {sp_name} has no polynomial fit"
             )
 
             old_poly_mu = self.old_poly_mu[i, :]
             old_poly_kappa = self.old_poly_kappa[i, :]
-            new_poly_mu = sd_new.polynomial.coeffs_mu
-            new_poly_kappa = sd_new.polynomial.coeffs_kappa
+            new_poly_mu = sp.polynomial.coeffs_mu
+            new_poly_kappa = sp.polynomial.coeffs_kappa
 
             mu_close = np.allclose(old_poly_mu, new_poly_mu, atol=ABS_TOL, rtol=REL_TOL)
             kappa_close = np.allclose(
@@ -195,15 +192,15 @@ class TestV2OldEquivalence(unittest.TestCase):
         failures = []
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
             self.assertIsNotNone(
-                sd_new.log_polynomial, f"Species {sp_name} has no log_polynomial fit"
+                sp.log_polynomial, f"Species {sp_name} has no log_polynomial fit"
             )
 
             old_logpoly_mu = self.old_logpoly_mu[i, :]
             old_logpoly_kappa = self.old_logpoly_kappa[i, :]
-            new_logpoly_mu = sd_new.log_polynomial.coeffs_mu
-            new_logpoly_kappa = sd_new.log_polynomial.coeffs_kappa
+            new_logpoly_mu = sp.log_polynomial.coeffs_mu
+            new_logpoly_kappa = sp.log_polynomial.coeffs_kappa
 
             mu_close = np.allclose(
                 old_logpoly_mu, new_logpoly_mu, atol=ABS_TOL, rtol=REL_TOL
@@ -235,7 +232,7 @@ class TestV2OldEquivalence(unittest.TestCase):
         T_test = np.linspace(400, 2500, 50)
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
 
             # Old implementation evaluation
             from ct2foam.thermo_transport import thermo_fitter as th_fitter
@@ -245,7 +242,7 @@ class TestV2OldEquivalence(unittest.TestCase):
             )
 
             # New implementation evaluation
-            new_cp = sd_new.nasa7.cp_over_R(T_test)
+            new_cp = sp.nasa7.cp_over_R(T_test)
 
             if not np.allclose(old_cp, new_cp, atol=1e-3, rtol=0.05):
                 max_diff = np.max(np.abs(old_cp - new_cp))
@@ -266,7 +263,7 @@ class TestV2OldEquivalence(unittest.TestCase):
         T_test = np.linspace(400, 2500, 50)
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
 
             # Old implementation evaluation
             from ct2foam.thermo_transport import thermo_fitter as th_fitter
@@ -276,7 +273,7 @@ class TestV2OldEquivalence(unittest.TestCase):
             )
 
             # New implementation evaluation
-            new_h = sd_new.nasa7.h_over_RT(T_test)
+            new_h = sp.nasa7.h_over_RT(T_test)
 
             if not np.allclose(old_h, new_h, atol=1e-3, rtol=0.10):
                 max_diff = np.max(np.abs(old_h - new_h))
@@ -297,7 +294,7 @@ class TestV2OldEquivalence(unittest.TestCase):
         T_test = np.linspace(400, 2500, 50)
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
 
             # Old implementation evaluation
             from ct2foam.thermo_transport import thermo_fitter as th_fitter
@@ -307,7 +304,7 @@ class TestV2OldEquivalence(unittest.TestCase):
             )
 
             # New implementation evaluation
-            new_s = sd_new.nasa7.s_over_R(T_test)
+            new_s = sp.nasa7.s_over_R(T_test)
 
             if not np.allclose(old_s, new_s, atol=1e-4, rtol=0.05):
                 max_diff = np.max(np.abs(old_s - new_s))
@@ -328,7 +325,7 @@ class TestV2OldEquivalence(unittest.TestCase):
         T_test = np.array([500.0, 1000.0, 1500.0, 2000.0])
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
 
             # Old implementation evaluation
             from ct2foam.thermo_transport import transport_fitter as tr_fitter
@@ -336,7 +333,7 @@ class TestV2OldEquivalence(unittest.TestCase):
             old_mu = tr_fitter.sutherland(T_test, self.old_As[i], self.old_Ts[i])
 
             # New implementation evaluation
-            new_mu = sd_new.sutherland.mu(T_test)
+            new_mu = sp.sutherland.mu(T_test)
 
             if not np.allclose(old_mu, new_mu, atol=ABS_TOL, rtol=REL_TOL):
                 max_diff = np.max(np.abs(old_mu - new_mu))
@@ -351,7 +348,7 @@ class TestV2OldEquivalence(unittest.TestCase):
         T_test = np.array([500.0, 1000.0, 1500.0, 2000.0])
 
         for i, sp_name in enumerate(self.old_data.names):
-            sd_new = self._get_species_by_name(sp_name)
+            sp = self._get_species_by_name(sp_name)
 
             # Old implementation evaluation
             from ct2foam.thermo_transport import transport_fitter as tr_fitter
@@ -361,7 +358,7 @@ class TestV2OldEquivalence(unittest.TestCase):
             )
 
             # New implementation evaluation
-            new_mu = sd_new.polynomial.mu(T_test)
+            new_mu = sp.polynomial.mu(T_test)
 
             if not np.allclose(old_mu, new_mu, atol=ABS_TOL, rtol=REL_TOL):
                 max_diff = np.max(np.abs(old_mu - new_mu))
@@ -373,10 +370,18 @@ class TestV2OldEquivalence(unittest.TestCase):
             )
 
     def test_cantera_coefficients_reused_when_valid(self):
-        """Verify that valid Cantera coefficients are reused, not refitted."""
-        # Check that the new implementation reports high reuse rate
-        total_species = len(self.new_mech.species_datasets)
-        reused_count = self.fit_result["reused"]
+        """Verify that valid Cantera coefficients are reused, not refitted.
+
+        We detect reuse by checking if the fitted Tmid matches exactly 1000.0,
+        which indicates Cantera coefficients were reused (since GRI-3.0 has Tmid=1000.0).
+        """
+        total_species = len(self.new_mech.species_list)
+        reused_count = 0
+
+        for sp in self.new_mech.species_list:
+            if sp.nasa7 is not None and abs(sp.nasa7.Tmid - 1000.0) < 1e-10:
+                reused_count += 1
+
         reuse_percent = 100 * reused_count / total_species
 
         # GRI-3.0 with Tmid=1000.0 should have very high reuse rate (>90%)
