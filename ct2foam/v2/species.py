@@ -8,7 +8,12 @@ from .polynomial import Polynomial
 
 
 class Species:
-    """Lightweight container for species metadata and fitted coefficients.
+    """
+    Lightweight container for species metadata and fitted coefficients.
+
+    Virtually similar to Cantera's Species class. Not inherited to allow
+    extendability to e.g. experimental data and to avoid sudden API
+    changes.
 
     This class stores species properties and the results of thermodynamic
     and transport fitting. Data arrays (T, cp, h, s, mu, kappa) are NOT
@@ -19,12 +24,10 @@ class Species:
         self,
         name,
         W,
-        cp0_over_R,
-        dhf_over_R,
-        s0_over_R,
         elements=None,
     ):
-        """Initialize Species with metadata.
+        """
+        Initialize Species with metadata.
 
         Args:
             name: Species name
@@ -36,11 +39,10 @@ class Species:
         """
         self.name = str(name)
         self.W = float(W)
-        self.cp0_over_R = float(cp0_over_R)
-        self.dhf_over_R = float(dhf_over_R)
-        self.s0_over_R = float(s0_over_R)
+        # TODO: rename elements to composition to match cantera
         self.elements = elements if elements is not None else {}
 
+        # TODO: you might want to add these to init arguments as we have from_ct
         # Fitted coefficients (populated externally)
         self.nasa7 = None
         self.sutherland = None
@@ -50,6 +52,26 @@ class Species:
         # Quality metrics (populated by check_quality)
         self.quality = None
 
+    @classmethod
+    def from_ct(cls, species: ct.Species):
+        """
+        Construct based on cantera Species object.
+        """
+        name = species.name
+        W = species.molecular_weight
+        elements = species.composition
+        nasa7 = NASA7Polynomial.from_ct(species)
+
+        JATKA TAHAN SUTHERLAND YMS DEFINITIONS
+
+        return Species(
+            name,
+            W,
+            elements,
+            nasa7
+        )
+
+    # TODO: this should be in NASA7 class surely?
     def check_quality(
         self,
         T,

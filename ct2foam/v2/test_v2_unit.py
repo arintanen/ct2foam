@@ -15,7 +15,7 @@ from ct2foam.v2.nasa7 import NASA7Polynomial
 from ct2foam.v2.sutherland import Sutherland
 from ct2foam.v2.polynomial import Polynomial
 from ct2foam.v2.species import Species
-from ct2foam.v2.mechanism_dataset import MechanismDataset
+from ct2foam.v2.cantera_data import CanteraThermoTransport
 from ct2foam.v2.fitting_tolerances import FittingTolerances
 
 # Note, OF_reference/Test-thermoMixture.C
@@ -576,8 +576,8 @@ class TestSpeciesOutput(unittest.TestCase):
             species_no_fit.to_foam_dict(Tlow=300, Thigh=3000)
 
 
-class TestMechanismDatasetWorkflow(unittest.TestCase):
-    """Test MechanismDataset end-to-end workflow."""
+class TestCanteraThermoTransportWorkflow(unittest.TestCase):
+    """Test CanteraThermoTransport end-to-end workflow."""
 
     @classmethod
     def setUpClass(cls):
@@ -586,25 +586,22 @@ class TestMechanismDatasetWorkflow(unittest.TestCase):
         cls.mech_file = test_data_dir / "h2o2_mod.yaml"
 
     def test_from_cantera_creates_dataset(self):
-        """from_cantera successfully creates a MechanismDataset."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        """Constructor and fit_thermodynamics successfully creates a CanteraThermoTransport."""
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
         self.assertIsNotNone(dataset)
-        self.assertIsInstance(dataset, MechanismDataset)
+        self.assertIsInstance(dataset, CanteraThermoTransport)
 
     def test_from_cantera_loads_all_species(self):
-        """from_cantera loads all species from mechanism."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        """Constructor and fit_thermodynamics loads all species from mechanism."""
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
         self.assertEqual(len(dataset.species_list), 10)  # h2o2_mod has 10 species
 
     def test_from_cantera_all_species_fitted(self):
         """All species should have fitted coefficients."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
         for sp in dataset.species_list:
             self.assertIsNotNone(sp.nasa7, f"{sp.name} missing nasa7")
             self.assertIsNotNone(sp.sutherland, f"{sp.name} missing sutherland")
@@ -613,32 +610,28 @@ class TestMechanismDatasetWorkflow(unittest.TestCase):
 
     def test_from_cantera_quality_checks_performed(self):
         """All species should have quality metrics."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
         for sp in dataset.species_list:
             self.assertIsNotNone(sp.quality, f"{sp.name} missing quality check")
 
     def test_from_cantera_custom_tmid(self):
-        """from_cantera respects custom Tmid."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1200.0, verbose=False
-        )
+        """fit_thermodynamics respects custom Tmid."""
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1200.0, verbose=False)
         self.assertEqual(dataset.Tmid, 1200.0)
 
     def test_from_cantera_custom_temperature_range(self):
-        """from_cantera respects custom Tlow/Thigh."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, Tlow=400.0, Thigh=2500.0, verbose=False
-        )
+        """fit_thermodynamics respects custom Tlow/Thigh."""
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, Tlow=400.0, Thigh=2500.0, verbose=False)
         self.assertEqual(dataset.Tlow, 400.0)
         self.assertEqual(dataset.Thigh, 2500.0)
 
     def test_write_output_creates_files(self):
         """write_output creates required OpenFOAM files."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "foam_output"
@@ -650,9 +643,8 @@ class TestMechanismDatasetWorkflow(unittest.TestCase):
 
     def test_write_output_thermo_file_content(self):
         """thermo.foam should contain species data."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "foam_output"
@@ -665,9 +657,8 @@ class TestMechanismDatasetWorkflow(unittest.TestCase):
 
     def test_write_output_species_file_content(self):
         """species.foam should list all species."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_dir = Path(tmpdir) / "foam_output"
@@ -678,25 +669,25 @@ class TestMechanismDatasetWorkflow(unittest.TestCase):
                 self.assertIn(sp.name, species_content)
 
 
-class TestMechanismDatasetErrorHandling(unittest.TestCase):
-    """Test error handling in MechanismDataset."""
+class TestCanteraThermoTransportErrorHandling(unittest.TestCase):
+    """Test error handling in CanteraThermoTransport."""
 
     def test_from_cantera_invalid_file_raises(self):
-        """from_cantera should raise error for invalid mechanism file."""
+        """Constructor should raise error for invalid mechanism file."""
         with self.assertRaises(Exception):
-            MechanismDataset.from_cantera("nonexistent_mechanism.yaml", Tmid=1000.0)
+            dataset = CanteraThermoTransport("nonexistent_mechanism.yaml")
+            dataset.fit_thermodynamics(Tmid=1000.0)
 
     def test_from_cantera_negative_tmid_raises(self):
-        """from_cantera should validate Tmid is positive."""
+        """fit_thermodynamics should validate Tmid is positive."""
         test_data_dir = Path(__file__).parent.parent / "test_data"
         mech_file = test_data_dir / "h2o2_mod.yaml"
 
         # Negative Tmid might cause issues, but might not be explicitly validated
         # This test checks current behavior
         try:
-            dataset = MechanismDataset.from_cantera(
-                mech_file, Tmid=-1000.0, verbose=False
-            )
+            dataset = CanteraThermoTransport(mech_file)
+            dataset.fit_thermodynamics(Tmid=-1000.0, verbose=False)
             # If it doesn't raise, that's current behavior
             self.assertIsNotNone(dataset)
         except (ValueError, AssertionError):
@@ -715,9 +706,8 @@ class TestNASA7ReuseLogic(unittest.TestCase):
 
     def test_cantera_coefficients_reused_by_default(self):
         """Valid Cantera coefficients should be reused by default."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         # Most species should successfully fit (either reused or refitted)
         fitted_count = sum(1 for sp in dataset.species_list if sp.nasa7 is not None)
@@ -725,9 +715,8 @@ class TestNASA7ReuseLogic(unittest.TestCase):
 
     def test_force_refit_refits_all(self):
         """force_refit=True should refit all species."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, force_refit=True, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, force_refit=True, verbose=False)
 
         # All species should still be fitted
         fitted_count = sum(1 for sp in dataset.species_list if sp.nasa7 is not None)
@@ -737,8 +726,9 @@ class TestNASA7ReuseLogic(unittest.TestCase):
         """Custom tolerances should affect reuse decisions."""
         strict_tolerances = FittingTolerances.strict()
 
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, tolerances=strict_tolerances, verbose=False
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(
+            Tmid=1000.0, tolerances=strict_tolerances, verbose=False
         )
 
         # With strict tolerances, some might need refitting

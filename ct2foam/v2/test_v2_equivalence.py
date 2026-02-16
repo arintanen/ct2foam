@@ -5,7 +5,7 @@ import numpy as np
 
 from ct2foam.thermo_transport.ct_properties import ctThermoTransport
 from ct2foam.thermo_transport import ct2foam_utils as old_utils
-from ct2foam.v2.mechanism_dataset import MechanismDataset
+from ct2foam.v2.cantera_data import CanteraThermoTransport
 
 # Test parameters
 MECHANISM = "gri30.yaml"
@@ -47,8 +47,8 @@ class TestV2OldEquivalence(unittest.TestCase):
         ) = cls.old_transport
 
         print(f"Loading {MECHANISM} with new implementation...")
-        cls.new_mech = MechanismDataset.from_cantera(
-            MECHANISM,
+        cls.new_mech = CanteraThermoTransport(MECHANISM)
+        cls.new_mech.fit_thermodynamics(
             Tmid=TMID,
             Tlow=TLOW,
             Thigh=THIGH,

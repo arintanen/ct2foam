@@ -5,14 +5,13 @@ import numpy as np
 from pathlib import Path
 import cantera as ct
 import tempfile
-import shutil
 
 from ct2foam.v2 import (
     NASA7Polynomial,
     Sutherland,
     Polynomial,
     Species,
-    MechanismDataset,
+    CanteraThermoTransport,
     FittingTolerances,
 )
 
@@ -425,8 +424,8 @@ class TestSpeciesClass(unittest.TestCase):
         self.assertIn("Ts", foam_dict)
 
 
-class TestMechanismDataset(unittest.TestCase):
-    """Test MechanismDataset functionality."""
+class TestCanteraThermoTransport(unittest.TestCase):
+    """Test CanteraThermoTransport functionality."""
 
     def setUp(self):
         """Set up test mechanism."""
@@ -434,20 +433,18 @@ class TestMechanismDataset(unittest.TestCase):
         self.mech_file = test_data_dir / "h2o2_mod.yaml"
 
     def test_from_cantera_loads_mechanism(self):
-        """Test that from_cantera successfully loads a mechanism."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        """Test that constructor and fit_thermodynamics successfully loads a mechanism."""
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         self.assertIsNotNone(dataset)
         self.assertEqual(len(dataset.species_list), 10)
         self.assertEqual(dataset.Tmid, 1000.0)
 
     def test_all_species_have_fitted_coefficients(self):
-        """Test that all species have fitted coefficients after from_cantera."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        """Test that all species have fitted coefficients after constructor and fit_thermodynamics."""
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         for sp in dataset.species_list:
             self.assertIsNotNone(sp.nasa7, f"{sp.name} missing nasa7")
@@ -458,9 +455,8 @@ class TestMechanismDataset(unittest.TestCase):
     def test_cantera_coefficient_reuse(self):
         """Test that Cantera coefficients are reused when appropriate."""
         # Load with default tolerances (should reuse most)
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         # Check that some species reused coefficients
         # We can check if the fit was successful by looking at quality
@@ -477,9 +473,8 @@ class TestMechanismDataset(unittest.TestCase):
 
     def test_force_refit(self):
         """Test that force_refit=True refits all species."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, force_refit=True, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, force_refit=True, verbose=False)
 
         # All species should still fit successfully
         for sp in dataset.species_list:
@@ -491,8 +486,8 @@ class TestMechanismDataset(unittest.TestCase):
         Thigh = 2500.0
         T_eval = np.linspace(Tlow, Thigh, 80)
 
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file,
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(
             Tmid=1200.0,
             Tlow=Tlow,
             Thigh=Thigh,
@@ -513,18 +508,16 @@ class TestMechanismDataset(unittest.TestCase):
             consistency_abs_tol=1e-8,
         )
 
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, tolerances=tolerances, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, tolerances=tolerances, verbose=False)
 
         # Should still load successfully
         self.assertEqual(len(dataset.species_list), 10)
 
     def test_write_output_creates_files(self):
         """Test that write_output creates OpenFOAM files."""
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         # Create temporary directory
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -547,9 +540,8 @@ class TestMechanismDataset(unittest.TestCase):
     def test_species_list_names_match_cantera(self):
         """Test that species names match Cantera mechanism."""
         gas = ct.Solution(str(self.mech_file))
-        dataset = MechanismDataset.from_cantera(
-            self.mech_file, Tmid=1000.0, verbose=False
-        )
+        dataset = CanteraThermoTransport(self.mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         dataset_names = [sp.name for sp in dataset.species_list]
         cantera_names = gas.species_names
@@ -568,7 +560,8 @@ class TestIntegrationEndToEnd(unittest.TestCase):
         mech_file = test_data_dir / "h2o2_mod.yaml"
 
         # Load and fit
-        dataset = MechanismDataset.from_cantera(mech_file, Tmid=1000.0, verbose=False)
+        dataset = CanteraThermoTransport(mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         # Check all species fitted
         self.assertEqual(len(dataset.species_list), 10)
@@ -589,11 +582,12 @@ class TestIntegrationEndToEnd(unittest.TestCase):
             self.assertTrue((output_dir / "species.foam").exists())
 
     def test_species_to_foam_dict_integration(self):
-        """Test Species.to_foam_dict() in context of MechanismDataset."""
+        """Test Species.to_foam_dict() in context of CanteraThermoTransport."""
         test_data_dir = Path(__file__).parent.parent / "test_data"
         mech_file = test_data_dir / "h2o2_mod.yaml"
 
-        dataset = MechanismDataset.from_cantera(mech_file, Tmid=1000.0, verbose=False)
+        dataset = CanteraThermoTransport(mech_file)
+        dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
 
         # Get a species and export it
         h2_species = next(sp for sp in dataset.species_list if sp.name == "H2")

@@ -1,7 +1,8 @@
-"""MechanismDataset orchestrator - manages Species objects and Cantera data."""
+"""Cantera to OpenFOAM converter - manages Species objects and writes OpenFOAM output."""
 
 import numpy as np
 from pathlib import Path
+from typing import List
 import cantera as ct
 
 from .species import Species
@@ -9,34 +10,146 @@ from .nasa7 import NASA7Polynomial
 from .sutherland import Sutherland
 from .polynomial import Polynomial
 from .fitting_tolerances import FittingTolerances
-from ct2foam.thermo_transport import foam_writer as writer
+from . import foam_writer as writer
 
 
-class MechanismDataset:
-    """Orchestrator that creates and manages Species objects for a mechanism."""
-
-    def __init__(self, species_list, mechanism_name, Tmid, Tlow, Thigh):
-        """Initialize MechanismDataset.
-
-        Args:
-            species_list: List of Species objects
-            mechanism_name: Name of the mechanism
-            Tmid: Midpoint temperature
-            Tlow: Low temperature limit
-            Thigh: High temperature limit
-        """
-        self.species_list = list(species_list)
-        self.mechanism_name = str(mechanism_name)
-        self.Tmid = float(Tmid)
-        self.Tlow = float(Tlow)
-        self.Thigh = float(Thigh)
-        self.fit_log = []
-        self.failed_species = {}
+class SpeciesList:
+    """
+    Base container class for a list of Species objects with thermo-transport
+    fitting functions.
+    """
+    def __init__(self, species: List[Species] = []):
+        # The species_list must be initialised by the derived class.
+        self.species = species
 
     @classmethod
-    def from_cantera(
-        cls,
-        mech_file,
+    def from_ct_mech(cls, mechanism_file: str):
+        """
+        Build species container based on cantera mechanism file and refit
+        any data if found invalid.
+        """
+        gas = ct.Solution(mech_file)
+        gas.transport_model = "multicomponent"
+
+        Tstd = 298.15
+        R = ct.gas_constant
+        succeeded = 0
+        failed = 0
+        reused = 0
+
+        # Construct Species object and append to a list
+        for sp_name in gas.species_names:
+            i = gas.species_index(sp_name)
+            sp_obj = gas.species(i)
+            reactants = sp_name + ":1.0"
+            # cp_over_R = cp / R
+            # h_over_RT = h / (R * T)
+            # s_over_R = s / R
+            #
+            HERE YOU NEED TO CHECK CONSISTENCY AND REFIT IF NECESSARY
+
+        # self.name = str(name)
+        # self.W = float(W)
+        # self.cp0_over_R = float(cp0_over_R)
+        # self.dhf_over_R = float(dhf_over_R)
+        # self.s0_over_R = float(s0_over_R)
+        # self.elements = elements if elements is not None else {}
+        #
+        # # Fitted coefficients (populated externally)
+        # self.nasa7 = None
+        # self.sutherland = None
+        # self.polynomial = None
+        # self.log_polynomial = None
+        #
+
+
+    def write_output(self, output_dir):
+        """Write OpenFOAM output files using foam_writer.
+
+        Args:
+            output_dir: Directory to write output files
+
+        Raises:
+            RuntimeError: If fitting has not been performed yet
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        thermo_file = output_dir / "thermo.foam"
+        reactions_file = output_dir / "reactions.foam"
+        species_file = output_dir / "species.foam"
+
+        # Remove existing files
+        for f in (thermo_file, reactions_file, species_file):
+            if f.exists():
+                f.unlink()
+
+        writer.write_reactions(reactions_file)
+
+        # TODO: sp.nasa7 and transport needs to be validated
+        names = [sp.name for sp in self.species if sp.nasa7 is not None]
+        writer.write_species_list(species_file, names)
+
+        for sp in self.species:
+            if sp.nasa7 is None:
+                continue
+
+            poly_mu = sp.polynomial.coeffs_mu if sp.polynomial else np.zeros(4)
+            poly_kappa = sp.polynomial.coeffs_kappa if sp.polynomial else np.zeros(4)
+            logpoly_mu = (
+                sp.log_polynomial.coeffs_mu if sp.log_polynomial else np.zeros(4)
+            )
+            logpoly_kappa = (
+                sp.log_polynomial.coeffs_kappa if sp.log_polynomial else np.zeros(4)
+            )
+            As = sp.sutherland.As if sp.sutherland else 0.0
+            Ts = sp.sutherland.Ts if sp.sutherland else 0.0
+
+            writer.write_thermo_transport(
+                thermo_file,
+                sp.name,
+                sp.W,
+                As,
+                Ts,
+                poly_mu,
+                poly_kappa,
+                logpoly_mu,
+                logpoly_kappa,
+                sp.nasa7.Tmid,
+                sp.nasa7.Tlow,
+                sp.nasa7.Thigh,
+                sp.nasa7.coeffs_low,
+                sp.nasa7.coeffs_high,
+                elements=sp.elements,
+            )
+
+
+
+
+class CanteraThermoTransport:
+    """Cantera mechanism dataset that loads from Cantera and fits coefficients on demand."""
+
+    def __init__(self, mech_file):
+        """Initialize by loading a Cantera mechanism.
+
+        Args:
+            mech_file: Path to Cantera mechanism file (.yaml, .cti, .xml)
+        """
+        self.mech_file = Path(mech_file)
+        self.gas = ct.Solution(str(mech_file))
+        self.mechanism_name = str(self.mech_file.name)
+
+        # Initialize as None - set when fitting
+        self.species_list: List[Species] = []
+        self.Tmid = None
+        self.Tlow = None
+        self.Thigh = None
+        self.fit_log = []
+        self.failed_species = {}
+        self._fitted = False
+
+    def fit_thermodynamics(
+        self,
         Tmid,
         Tlow=None,
         Thigh=None,
@@ -45,17 +158,9 @@ class MechanismDataset:
         force_refit=False,
         verbose=True,
     ):
-        """Create a MechanismDataset by loading and fitting a Cantera mechanism.
-
-        This method:
-        1. Loads the Cantera mechanism
-        2. Evaluates thermodynamic and transport data at T_eval
-        3. Decides whether to reuse Cantera NASA7 coefficients or refit
-        4. Fits transport properties
-        5. Creates Species objects with fitted coefficients
+        """Fit thermodynamic and transport coefficients for all species.
 
         Args:
-            mech_file: Path to Cantera mechanism file
             Tmid: Midpoint temperature (K)
             Tlow: Low temperature limit (default 200K)
             Thigh: High temperature limit (default 5000K)
@@ -63,14 +168,10 @@ class MechanismDataset:
             tolerances: FittingTolerances instance (default: FittingTolerances.default())
             force_refit: If True, always refit (skip Cantera coefficient reuse)
             verbose: If True, print fitting messages
-
-        Returns:
-            MechanismDataset instance with fitted Species objects
         """
         if tolerances is None:
             tolerances = FittingTolerances.default()
 
-        gas = ct.Solution(str(mech_file))
         R = ct.gas_constant
         p0 = ct.one_atm
 
@@ -80,6 +181,11 @@ class MechanismDataset:
             Thigh = 5000.0
         if T_eval is None:
             T_eval = np.linspace(Tlow, Thigh, 100)
+
+        # Store temperature bounds
+        self.Tmid = float(Tmid)
+        self.Tlow = float(Tlow)
+        self.Thigh = float(Thigh)
 
         T_eval = np.sort(T_eval)
         # Insert Tmid into the T array if not already present
@@ -92,15 +198,15 @@ class MechanismDataset:
         fit_log = []
         failed_species = {}
 
-        gas.transport_model = "multicomponent"
+        self.gas.transport_model = "multicomponent"
 
         succeeded = 0
         failed = 0
         reused = 0
 
-        for sp_name in gas.species_names:
-            i = gas.species_index(sp_name)
-            sp_obj = gas.species(i)
+        for sp_name in self.gas.species_names:
+            i = self.gas.species_index(sp_name)
+            sp_obj = self.gas.species(i)
             reactants = sp_name + ":1.0"
 
             try:
@@ -109,7 +215,7 @@ class MechanismDataset:
 
                 # ==== STEP 2: Evaluate thermodynamic and transport data ====
                 T, cp, h, s, mu, kappa, cv = _evaluate_cantera_data(
-                    gas, sp_name, T_eval, p0
+                    self.gas, sp_name, T_eval, p0
                 )
 
                 # ==== STEP 3: Get standard-state properties ====
@@ -119,8 +225,8 @@ class MechanismDataset:
 
                 # ==== STEP 4: Get elemental composition ====
                 elements = {}
-                for elem in gas.element_names:
-                    na = gas.n_atoms(sp_name, elem)
+                for elem in self.gas.element_names:
+                    na = self.gas.n_atoms(sp_name, elem)
                     if na > 0:
                         elements[elem] = na
 
@@ -225,7 +331,7 @@ class MechanismDataset:
                 # ==== STEP 7: Create Species object ====
                 species = Species(
                     name=sp_name,
-                    W=gas.molecular_weights[i],
+                    W=self.gas.molecular_weights[i],
                     cp0_over_R=cp0_over_R,
                     dhf_over_R=dhf_over_R,
                     s0_over_R=s0_over_R,
@@ -256,22 +362,25 @@ class MechanismDataset:
                 if verbose:
                     print(msg)
 
-        # Create MechanismDataset instance
-        mech = cls(species_list, str(mech_file), Tmid, T_eval[0], T_eval[-1])
-        mech.fit_log = fit_log
-        mech.failed_species = failed_species
+        # Store results
+        self.species_list = species_list
+        self.fit_log = fit_log
+        self.failed_species = failed_species
+        self._fitted = True
 
         # Print summary
         if verbose:
             print(f"\nFitting summary:")
-            print(f"  Succeeded: {succeeded}/{len(gas.species_names)}")
-            print(f"  Failed: {failed}/{len(gas.species_names)}")
+            print(f"  Succeeded: {succeeded}/{len(self.gas.species_names)}")
+            print(f"  Failed: {failed}/{len(self.gas.species_names)}")
             print(f"  Reused Cantera coefficients: {reused}/{succeeded}")
-
-        return mech
 
     def print_fit_summary(self):
         """Print a summary of the fitting process."""
+        if not self._fitted:
+            print("No fitting has been performed yet. Call fit_thermodynamics() first.")
+            return
+
         total = len(self.species_list) + len(self.failed_species)
         n_failed = len(self.failed_species)
         n_ok = len(self.species_list)
@@ -285,7 +394,19 @@ class MechanismDataset:
                 print(f"    - {msg}")
 
     def write_output(self, output_dir):
-        """Write OpenFOAM output files using foam_writer."""
+        """Write OpenFOAM output files using foam_writer.
+
+        Args:
+            output_dir: Directory to write output files
+
+        Raises:
+            RuntimeError: If fitting has not been performed yet
+        """
+        if not self._fitted:
+            raise RuntimeError(
+                "Cannot write output before fitting. Call fit_thermodynamics() first."
+            )
+
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -351,19 +472,7 @@ def _extract_cantera_nasa7(sp_obj):
     Returns:
         (NASA7Polynomial | None, bool): (nasa7_object, is_nasa7_format)
     """
-    thermo_type = type(sp_obj.thermo).__name__
-    is_nasa7 = thermo_type == "NasaPoly2"
-
-    if not is_nasa7:
-        return None, False
-
-    # Extract coefficients: [Tmid, c_hi[0..6], c_lo[0..6]]
-    coeffs = sp_obj.thermo.coeffs
-    ct_Tmid = float(coeffs[0])
-    ct_c_hi = np.array(coeffs[1:8])
-    ct_c_lo = np.array(coeffs[8:15])
-
-    return NASA7Polynomial(ct_c_lo, ct_c_hi, ct_Tmid), True
+    return , True
 
 
 def _evaluate_cantera_data(gas, sp_name, T_eval, p0):

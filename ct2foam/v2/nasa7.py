@@ -1,18 +1,70 @@
 """NASA7 polynomial coefficient class for thermodynamic properties."""
-
+import cantera as ct
 import numpy as np
 from ct2foam.thermo_transport import lsqlin
 
-_T_STD = 298.15
+_Tstd = 298.15 # TODO: is this used elsewhere - replace
 
 
 class NASA7Polynomial:
     """Encapsulates NASA7 polynomial coefficients and evaluation methods."""
 
-    def __init__(self, coeffs_low, coeffs_high, Tmid):
+    def __init__(self, coeffs_low, coeffs_high, Tmid, Tmin=200.0, Tmax=3000.0):
         self.coeffs_low = np.asarray(coeffs_low, dtype=float)
         self.coeffs_high = np.asarray(coeffs_high, dtype=float)
-        self.Tmid = float(Tmid)
+        self.Tmid = Tmid
+        self.Tlow = Tmin
+        self.Tmax = Tmax
+
+    @classmethod
+    def from_ct(cls, species: ct.Species):
+        """
+        Construct from Cantera Species object
+        """
+         # Use existing NASA7 polynomials if possible (NasaPoly2 as CT base name)
+        Tmin = species.thermo.min_temp
+        Tmax = species.thermo.max_temp
+
+        thermo_type = type(species.thermo).__name__
+        if thermo_type == "NasaPoly2":
+            coeffs = species.thermo.coeffs
+            Tmid = float(coeffs[0])
+            c_hi = np.array(coeffs[1:8])
+            c_lo = np.array(coeffs[8:15])
+
+            return NASA7Polynomial(c_lo, c_hi, Tmid, Tmin, Tmax)
+
+        # Otherwise, evaluate and fit data
+        R = ct.gas_constant
+        cp0_over_R = species.thermo.cp(_Tstd) / R
+        dhf_over_R = species.thermo.h(_Tstd) / R # TODO: check if R or RT?
+        s0_over_R = species.thermo.s(_Tstd) / R
+
+        nT = 100 # TODO: check/fix
+        T = np.linspace(Tmin, Tmax, nT)
+        cp_over_R = np.zeros(nT)
+        h_over_RT = np.zeros(nT)
+        s_over_R = np.zeros(nT)
+
+        for i, Ti in enumerate(T):
+            # Base thermo functions return molar values
+            cp_over_R[i] = species.thermo.cp(Ti) / R
+            h_over_RT[i] = species.thermo.h(Ti) / (R * T)
+            s_over_R[i] = species.thermo.s(Ti) / R
+
+        Tmid = 1000.0
+
+        return NASA7Polynomial.fit_full(
+            T,
+            cp_over_R,
+            h_over_RT,
+            s_over_R,
+            cp0_over_R,
+            dhf_over_R,
+            s0_over_R,
+            Tmid
+        )
+
 
     # -- private single-range evaluators --
 
@@ -139,7 +191,7 @@ class NASA7Polynomial:
             Aeq[0, i] = Tcommon**i
             Aeq[0, i + M] = -(Tcommon**i)
             Aeq[1, i] = Tcommon**i
-            Aeq[2, i] = _T_STD**i
+            Aeq[2, i] = _Tstd**i
             Aeq[3, i + M] = T_concat[-1] ** i
 
         beq[0] = 0.0
@@ -240,19 +292,19 @@ class NASA7Polynomial:
 
         i1 = Nl + Nh
         i2 = i1 + Nl
-        C[i1:i2, 0] = np.ones((1, Nl)) - _T_STD / T_low
-        C[i1:i2, 1] = (c1 * T_low) - (_T_STD / T_low) * (c1 * _T_STD)
-        C[i1:i2, 2] = (c2 * T_low) ** 2 - (_T_STD / T_low) * (c2 * _T_STD) ** 2
-        C[i1:i2, 3] = (c3 * T_low) ** 3 - (_T_STD / T_low) * (c3 * _T_STD) ** 3
-        C[i1:i2, 4] = (c4 * T_low) ** 4 - (_T_STD / T_low) * (c4 * _T_STD) ** 4
+        C[i1:i2, 0] = np.ones((1, Nl)) - _Tstd / T_low
+        C[i1:i2, 1] = (c1 * T_low) - (_Tstd / T_low) * (c1 * _Tstd)
+        C[i1:i2, 2] = (c2 * T_low) ** 2 - (_Tstd / T_low) * (c2 * _Tstd) ** 2
+        C[i1:i2, 3] = (c3 * T_low) ** 3 - (_Tstd / T_low) * (c3 * _Tstd) ** 3
+        C[i1:i2, 4] = (c4 * T_low) ** 4 - (_Tstd / T_low) * (c4 * _Tstd) ** 4
 
         i3 = i2
         i4 = i2 + Nh
-        C[i3:i4, 0 + M] = np.ones((1, Nh)) - _T_STD / T_high
-        C[i3:i4, 1 + M] = (c1 * T_high) - (_T_STD / T_high) * (c1 * _T_STD)
-        C[i3:i4, 2 + M] = (c2 * T_high) ** 2 - (_T_STD / T_high) * (c2 * _T_STD) ** 2
-        C[i3:i4, 3 + M] = (c3 * T_high) ** 3 - (_T_STD / T_high) * (c3 * _T_STD) ** 3
-        C[i3:i4, 4 + M] = (c4 * T_high) ** 4 - (_T_STD / T_high) * (c4 * _T_STD) ** 4
+        C[i3:i4, 0 + M] = np.ones((1, Nh)) - _Tstd / T_high
+        C[i3:i4, 1 + M] = (c1 * T_high) - (_Tstd / T_high) * (c1 * _Tstd)
+        C[i3:i4, 2 + M] = (c2 * T_high) ** 2 - (_Tstd / T_high) * (c2 * _Tstd) ** 2
+        C[i3:i4, 3 + M] = (c3 * T_high) ** 3 - (_Tstd / T_high) * (c3 * _Tstd) ** 3
+        C[i3:i4, 4 + M] = (c4 * T_high) ** 4 - (_Tstd / T_high) * (c4 * _Tstd) ** 4
 
         # s equation
         c2 = (1.0 / 2.0) ** (1.0 / 2.0)
@@ -261,19 +313,19 @@ class NASA7Polynomial:
 
         i5 = i4
         i6 = i4 + Nl
-        C[i5:i6, 0] = np.log(T_low / _T_STD)
-        C[i5:i6, 1] = T_low - _T_STD
-        C[i5:i6, 2] = (c2 * T_low) ** 2 - (c2 * _T_STD) ** 2
-        C[i5:i6, 3] = (c3 * T_low) ** 3 - (c3 * _T_STD) ** 3
-        C[i5:i6, 4] = (c4 * T_low) ** 4 - (c4 * _T_STD) ** 4
+        C[i5:i6, 0] = np.log(T_low / _Tstd)
+        C[i5:i6, 1] = T_low - _Tstd
+        C[i5:i6, 2] = (c2 * T_low) ** 2 - (c2 * _Tstd) ** 2
+        C[i5:i6, 3] = (c3 * T_low) ** 3 - (c3 * _Tstd) ** 3
+        C[i5:i6, 4] = (c4 * T_low) ** 4 - (c4 * _Tstd) ** 4
 
         i7 = i6
         i8 = i6 + Nh
-        C[i7:i8, 0 + M] = np.log(T_high / _T_STD)
-        C[i7:i8, 1 + M] = T_high - _T_STD
-        C[i7:i8, 2 + M] = (c2 * T_high) ** 2 - (c2 * _T_STD) ** 2
-        C[i7:i8, 3 + M] = (c3 * T_high) ** 3 - (c3 * _T_STD) ** 3
-        C[i7:i8, 4 + M] = (c4 * T_high) ** 4 - (c4 * _T_STD) ** 4
+        C[i7:i8, 0 + M] = np.log(T_high / _Tstd)
+        C[i7:i8, 1 + M] = T_high - _Tstd
+        C[i7:i8, 2 + M] = (c2 * T_high) ** 2 - (c2 * _Tstd) ** 2
+        C[i7:i8, 3 + M] = (c3 * T_high) ** 3 - (c3 * _Tstd) ** 3
+        C[i7:i8, 4 + M] = (c4 * T_high) ** 4 - (c4 * _Tstd) ** 4
 
         # RHS
         d[:Nl] = cp_over_R_L
@@ -290,7 +342,7 @@ class NASA7Polynomial:
         for i in range(5):
             Aeq[0, i] = Tcommon**i
             Aeq[0, i + M] = -(Tcommon**i)
-            Aeq[2, i] = _T_STD**i
+            Aeq[2, i] = _Tstd**i
 
         Aeq[1, 1] = 1.0
         Aeq[1, 2] = 2.0 * Tcommon
@@ -380,7 +432,7 @@ class NASA7Polynomial:
     @staticmethod
     def _correct_coeffs(coeffs, Tcommon, dhf_over_R, s0_over_R):
         """Solve for integration constants ensuring continuity at Tcommon."""
-        T_std = _T_STD
+        T_std = _Tstd
 
         # coeff[5]: enthalpy at standard conditions
         coeffs[5] = dhf_over_R - (

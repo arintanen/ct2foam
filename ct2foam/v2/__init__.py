@@ -4,7 +4,7 @@ from .nasa7 import NASA7Polynomial
 from .sutherland import Sutherland
 from .polynomial import Polynomial
 from .species import Species
-from .mechanism_dataset import MechanismDataset
+from .cantera_data import CanteraThermoTransport
 from .fitting_tolerances import FittingTolerances
 
 __all__ = [
@@ -12,6 +12,6 @@ __all__ = [
     "Sutherland",
     "Polynomial",
     "Species",
-    "MechanismDataset",
+    "CanteraThermoTransport",
     "FittingTolerances",
 ]
