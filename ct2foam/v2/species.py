@@ -1,11 +1,15 @@
 """Species class - lightweight container for species metadata and fitted coefficients."""
+from typing import List
+from pathlib import Path
 
 import numpy as np
+
 import cantera as ct
+# TODO: fix paths eventually
 from .nasa7 import NASA7Polynomial
 from .sutherland import Sutherland
 from .polynomial import Polynomial
-
+import ct2foam.v2.foam_writer as writer
 
 class Species:
     """
@@ -24,7 +28,11 @@ class Species:
         self,
         name,
         W,
-        elements=None,
+        elements={},
+        nasa7=None,
+        sutherland=None,
+        polynomial=None,
+        log_polynomial=None,
     ):
         """
         Initialize Species with metadata.
@@ -39,98 +47,49 @@ class Species:
         """
         self.name = str(name)
         self.W = float(W)
-        # TODO: rename elements to composition to match cantera
-        self.elements = elements if elements is not None else {}
-
-        # TODO: you might want to add these to init arguments as we have from_ct
-        # Fitted coefficients (populated externally)
-        self.nasa7 = None
-        self.sutherland = None
-        self.polynomial = None
-        self.log_polynomial = None
-
-        # Quality metrics (populated by check_quality)
-        self.quality = None
+        self.elements = elements
+        self.nasa7 = nasa7
+        self.sutherland = sutherland
+        self.polynomial = polynomial
+        self.log_polynomial = log_polynomial
 
     @classmethod
-    def from_ct(cls, species: ct.Species):
+    def from_ct(
+        cls,
+        gas: ct.Solution,
+        species_name: str,
+        Tmin: float = 200,
+        Tmax: float = 3000,
+        Tmid: float = 1000,
+    ):
         """
         Construct based on cantera Species object.
         """
-        name = species.name
+        species = gas.species(gas.species_index(species_name))
         W = species.molecular_weight
         elements = species.composition
-        nasa7 = NASA7Polynomial.from_ct(species)
-
-        JATKA TAHAN SUTHERLAND YMS DEFINITIONS
-
-        return Species(
-            name,
-            W,
-            elements,
-            nasa7
+        nasa7 = NASA7Polynomial.from_ct(species, Tmin, Tmax, Tmid, n=128)
+        sutherland = Sutherland.from_ct(gas, species, n=100)
+        polynomial = Polynomial.from_ct(gas, species, poly_type="polynomial", n=100)
+        log_polynomial = Polynomial.from_ct(
+            gas, species, poly_type="log_polynomial", n=100
         )
 
-    # TODO: this should be in NASA7 class surely?
-    def check_quality(
-        self,
-        T,
-        cp,
-        h,
-        s,
-        abs_tol_consistency=0.1,
-        cp_tol=1e-6,
-        cpdT_tol=0.01,
-        h_tol=1e-6,
-        s_tol=1e-6,
-    ):
-        """Check NASA7 fit quality against reference data.
+        return cls(
+            name=species_name,
+            W=W,
+            elements=elements,
+            nasa7=nasa7,
+            sutherland=sutherland,
+            polynomial=polynomial,
+            log_polynomial=log_polynomial,
+        )
 
-        Args:
-            T: Temperature array
-            cp: Specific heat (molar) array
-            h: Enthalpy (molar) array
-            s: Entropy (molar) array
-            abs_tol_consistency: Consistency check tolerance
-            cp_tol: Continuity cp tolerance
-            cpdT_tol: Continuity dcp/dT tolerance
-            h_tol: Continuity h tolerance
-            s_tol: Continuity s tolerance
-
-        Returns:
-            Quality metrics dict
-
-        Raises:
-            RuntimeError: If fit_thermo() has not been called
+    def is_valid(self):
         """
-        if self.nasa7 is None:
-            raise RuntimeError(
-                f"Species {self.name}: NASA7 coefficients not set. "
-                "Fitting must be performed before quality check."
-            )
-
-        R_gas = ct.gas_constant
-        T = np.asarray(T, dtype=float)
-        cp = np.asarray(cp, dtype=float)
-        h = np.asarray(h, dtype=float)
-        s = np.asarray(s, dtype=float)
-
-        cp_over_R = cp / R_gas
-        h_over_RT = h / (R_gas * T)
-        s_over_R = s / R_gas
-
-        consistency = self.nasa7.check_consistency(
-            T, cp_over_R, h_over_RT, s_over_R, abs_tol=abs_tol_consistency
-        )
-        continuity = self.nasa7.check_continuity(
-            cp_tol=cp_tol, cpdT_tol=cpdT_tol, h_tol=h_tol, s_tol=s_tol
-        )
-
-        self.quality = {
-            "consistency": consistency,
-            "continuity": continuity,
-        }
-        return self.quality
+        Ensure everything is defined accordingly
+        """
+        return True
 
     def to_foam_dict(self, Tlow, Thigh):
         """Convert fitted data to an OpenFOAM-compatible dict.
@@ -177,3 +136,90 @@ class Species:
             result["elements"] = self.elements
 
         return result
+
+
+class SpeciesList:
+    """
+    Base container class for a list of Species objects with thermo-transport
+    fitting functions.
+
+    Here, we can extend to e.g. experimental data by adding new constructors.
+    """
+    def __init__(self, species: List[Species] = []):
+        self.species = species
+
+    @classmethod
+    def from_ct_mech(cls, mechanism_file: str, Tmin: float, Tmax: float, Tmid: float):
+        """
+        Build species container based on cantera mechanism file and refit
+        any data if found invalid.
+        """
+        gas = ct.Solution(mechanism_file)
+        gas.transport_model = "multicomponent"
+
+        species_list = []
+        # Construct Species object and append to a list
+        for sp_name in gas.species_names:
+            spi = Species.from_ct(gas, sp_name, Tmin, Tmax, Tmid)
+            species_list.append(spi)
+
+        return cls(species_list)
+
+    def write_foam(self, output_dir):
+        """Write OpenFOAM output files using foam_writer.
+
+        Args:
+            output_dir: Directory to write output files
+
+        Raises:
+            RuntimeError: If fitting has not been performed yet
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        thermo_file = output_dir / "thermo.foam"
+        reactions_file = output_dir / "reactions.foam"
+        species_file = output_dir / "species.foam"
+
+        # Remove existing files
+        thermo_file.unlink(missing_ok=True)
+        reactions_file.unlink(missing_ok=True)
+        species_file.unlink(missing_ok=True)
+
+        writer.write_reactions(reactions_file)
+
+        names = [sp.name for sp in self.species if sp.nasa7 is not None]
+        writer.write_species_list(species_file, names)
+
+        for sp in self.species:
+            if sp.nasa7 is None:
+                continue
+
+            poly_mu = sp.polynomial.coeffs_mu if sp.polynomial else np.zeros(4)
+            poly_kappa = sp.polynomial.coeffs_kappa if sp.polynomial else np.zeros(4)
+            logpoly_mu = (
+                sp.log_polynomial.coeffs_mu if sp.log_polynomial else np.zeros(4)
+            )
+            logpoly_kappa = (
+                sp.log_polynomial.coeffs_kappa if sp.log_polynomial else np.zeros(4)
+            )
+            As = sp.sutherland.As if sp.sutherland else 0.0
+            Ts = sp.sutherland.Ts if sp.sutherland else 0.0
+
+            writer.write_thermo_transport(
+                thermo_file,
+                sp.name,
+                sp.W,
+                As,
+                Ts,
+                poly_mu,
+                poly_kappa,
+                logpoly_mu,
+                logpoly_kappa,
+                sp.nasa7.Tmid,
+                sp.nasa7.Tlow,
+                sp.nasa7.Thigh,
+                sp.nasa7.coeffs_low,
+                sp.nasa7.coeffs_high,
+                elements=sp.elements,
+            )

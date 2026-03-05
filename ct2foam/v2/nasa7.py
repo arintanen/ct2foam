@@ -1,15 +1,64 @@
 """NASA7 polynomial coefficient class for thermodynamic properties."""
+
+from typing import Callable, List
+from numpy import typing as npt
+from dataclasses import dataclass
+
 import cantera as ct
 import numpy as np
 from ct2foam.thermo_transport import lsqlin
 
-_Tstd = 298.15 # TODO: is this used elsewhere - replace
+_Tstd = 298.15  # TODO: is this used elsewhere - replace by imported value?
+
+@dataclass
+class ThermoData:
+    # Universal gas constant [J/kmol/K]
+    gas_constant: float
+    # Temperature [K]
+    temperature: npt.NDArray[np.floating]
+    # Molar heat capacity [J/kmol/K]
+    cp: npt.NDArray[np.floating]
+    # Molar enthalpy [J/kmol]
+    h: npt.NDArray[np.floating]
+    # Molar entropy [J/kmol/K]
+    s: npt.NDArray[np.floating]
+    # Standard-state specific heat [J/kmol/K]: cp(298.15K)
+    cp0: float
+    # Enthalpy of formation [J/kmol]: h(298.15K)
+    dhf: float
+    # Standard entropy [J/kmol/K]: s(298.15K) / R
+    s0: float
+
+    @classmethod
+    def from_ct(
+        cls,
+        species: ct.Species,
+        temperature: npt.NDArray[np.floating],
+        gas_constant: float = ct.gas_constant,
+    ):
+        """
+        Evaluate data for fitting based on Cantera species.
+        """
+        cp0 = species.thermo.cp(_Tstd)
+        dhf = species.thermo.h(_Tstd)
+        s0 = species.thermo.s(_Tstd)
+
+        cp = np.zeros_like(temperature)
+        h = np.zeros_like(temperature)
+        s = np.zeros_like(temperature)
+        for i, Ti in enumerate(temperature):
+            # Base thermo functions return molar values
+            cp[i] = species.thermo.cp(Ti)
+            h[i] = species.thermo.h(Ti)
+            s[i] = species.thermo.s(Ti)
+
+        return cls(gas_constant, temperature, cp, h, s, cp0, dhf, s0)
 
 
 class NASA7Polynomial:
     """Encapsulates NASA7 polynomial coefficients and evaluation methods."""
 
-    def __init__(self, coeffs_low, coeffs_high, Tmid, Tmin=200.0, Tmax=3000.0):
+    def __init__(self, coeffs_low, coeffs_high, Tmid, Tmin, Tmax):
         self.coeffs_low = np.asarray(coeffs_low, dtype=float)
         self.coeffs_high = np.asarray(coeffs_high, dtype=float)
         self.Tmid = Tmid
@@ -17,54 +66,79 @@ class NASA7Polynomial:
         self.Tmax = Tmax
 
     @classmethod
-    def from_ct(cls, species: ct.Species):
+    def from_ct(
+        cls, species: ct.Species, Tmin: float, Tmax: float, Tmid: float, n: int=128
+    ):
         """
         Construct from Cantera Species object
         """
-         # Use existing NASA7 polynomials if possible (NasaPoly2 as CT base name)
-        Tmin = species.thermo.min_temp
-        Tmax = species.thermo.max_temp
+        # Use existing NASA7 polynomials if possible
+        full_refit_required = False
+        cp_refit_required = False
+
+        print(f"Trying to use existing thermo fits for {species.name}:")
 
         thermo_type = type(species.thermo).__name__
-        if thermo_type == "NasaPoly2":
-            coeffs = species.thermo.coeffs
-            Tmid = float(coeffs[0])
-            c_hi = np.array(coeffs[1:8])
-            c_lo = np.array(coeffs[8:15])
+        coeffs = species.thermo.coeffs
 
-            return NASA7Polynomial(c_lo, c_hi, Tmid, Tmin, Tmax)
+        if thermo_type != "NasaPoly2":
+            full_refit_required = True
+            print("- Warning: thermo type is not NASA7-Polynomial.")
 
-        # Otherwise, evaluate and fit data
-        R = ct.gas_constant
-        cp0_over_R = species.thermo.cp(_Tstd) / R
-        dhf_over_R = species.thermo.h(_Tstd) / R # TODO: check if R or RT?
-        s0_over_R = species.thermo.s(_Tstd) / R
+        if species.thermo.min_temp > Tmin:
+            full_refit_required = True
+            print(f"- Warning: Tmin above limit ({species.thermo.min_temp} > {Tmin})")
 
-        nT = 100 # TODO: check/fix
-        T = np.linspace(Tmin, Tmax, nT)
-        cp_over_R = np.zeros(nT)
-        h_over_RT = np.zeros(nT)
-        s_over_R = np.zeros(nT)
+        if species.thermo.max_temp < Tmax:
+            full_refit_required = True
+            print(f"- Warning: Tmax below limit ({species.thermo.max_temp} < {Tmin})")
 
-        for i, Ti in enumerate(T):
-            # Base thermo functions return molar values
-            cp_over_R[i] = species.thermo.cp(Ti) / R
-            h_over_RT[i] = species.thermo.h(Ti) / (R * T)
-            s_over_R[i] = species.thermo.s(Ti) / R
+        # TODO: how user could set tolerances?
+        if np.abs(Tmid - coeffs[0]) / Tmid > 1e-6:
+            cp_refit_required = True
+            print(f"- Warning: different common temperature: {coeffs[0]} != {Tmid}")
 
-        Tmid = 1000.0
+        c_hi = np.array(coeffs[1:8])
+        c_lo = np.array(coeffs[8:15])
+        nasa7 = cls(c_lo, c_hi, Tmid, Tmin, Tmax)
 
-        return NASA7Polynomial.fit_full(
-            T,
-            cp_over_R,
-            h_over_RT,
-            s_over_R,
-            cp0_over_R,
-            dhf_over_R,
-            s0_over_R,
-            Tmid
-        )
+        tol_c0 = 1e-6
+        continuous = nasa7.is_c0_continuous(tol=tol_c0)
+        if not continuous:
+            print("- Warning: Existing polynomial not continuous:")
+            c0_error = nasa7.continuity_error()
+            if c0_error["h"] < tol_c0 and c0_error["s"] < tol_c0:
+                print("  - h and s are c0 continuous --> refit cp only.")
+                cp_refit_required = True
+            else:
+                full_refit_required = True
 
+        if not (full_refit_required or cp_refit_required):
+            print("- OK: re-using NASA7-polynomials.")
+            return nasa7
+
+        _n = int(n / 2)
+        _Tl = np.linspace(Tmin, Tmid, _n, endpoint=False)
+        _Th = np.linspace(Tmid, Tmax, _n)
+        T = np.concatenate((_Tl, _Th))
+        R = ct.gas_constant # TODO: this should be OF one?
+        thermo_data = ThermoData.from_ct(species, T, R)
+
+        # Refit cp only
+        if not full_refit_required:
+            print("- Re-fitting Cp only.")
+            nasa7 = cls.fit_cp_only(thermo_data, Tmin, Tmax, Tmid)
+            # Raise if not within tolerances
+            _ = nasa7.fit_quality(thermo_data, error=True, tol=1e-2, tol_c0=1e-6)
+            return nasa7
+
+        # Otherwise carry out full system fit
+        print("- Re-fitting full system.")
+        nasa7 = cls.fit_full(thermo_data, Tmin, Tmax, Tmid)
+
+        # Raise if not within tolerances
+        _ = nasa7.fit_quality(thermo_data, error=True, tol=1e-2, tol_c0=1e-6)
+        return nasa7
 
     # -- private single-range evaluators --
 
@@ -140,34 +214,23 @@ class NASA7Polynomial:
         result[hi] = self._dcpdT(self.coeffs_high, T[hi])
         return result
 
-    # -- fitting methods (class methods) --
 
     @classmethod
-    def fit_cp_only(cls, T, cp_over_R, cp0_over_R, dhf_over_R, s0_over_R, Tmid):
+    def fit_cp_only(cls, data: ThermoData, Tmin, Tmax, Tcommon):
         """Fit NASA7 coefficients using cp/R data only.
-
-        Args:
-            T: Temperature array
-            cp_over_R: Specific heat data (dimensionless)
-            cp0_over_R: Standard-state cp/R at 298.15K
-            dhf_over_R: Standard-state enthalpy/R at 298.15K
-            s0_over_R: Standard-state entropy/R at 298.15K
-            Tmid: Midpoint temperature
-
         Returns:
             NASA7Polynomial instance
         """
-        T0 = np.asarray(T, dtype=float)
-        cp_over_R = np.asarray(cp_over_R, dtype=float)
-        Tmid = float(Tmid)
-
+        T = data.temperature
         # Find index closest to Tmid
-        Tc_i = int(np.argmin(np.abs(T0 - Tmid)))
-        Tcommon = T0[Tc_i]
-
-        T_low = T0[0 : Tc_i + 1]
-        T_high = T0[Tc_i:]
+        Tc_i = np.argmin(np.abs(T - Tcommon))
+        T_low = T[0 : Tc_i + 1]
+        T_high = T[Tc_i:]
         T_concat = np.concatenate((T_low, T_high))
+
+        cp_over_R = data.cp / data.gas_constant
+        cp0_over_R = data.cp0 / data.gas_constant
+
 
         Nl = len(T_low)
         Nh = len(T_high)
@@ -228,41 +291,34 @@ class NASA7Polynomial:
             coeffs[i] = coeffs_tmp[i]
             coeffs[i + 7] = coeffs_tmp[i + M]
 
+        dhf_over_R = data.dhf / data.gas_constant
+        s0_over_R = data.s0 / data.gas_constant
         coeffs_corrected = cls._correct_coeffs(coeffs, Tcommon, dhf_over_R, s0_over_R)
-        return cls(coeffs_corrected[:7], coeffs_corrected[7:], Tmid)
+
+        return cls(coeffs_corrected[:7], coeffs_corrected[7:], Tcommon, Tmin, Tmax)
 
     @classmethod
-    def fit_full(
-        cls, T, cp_over_R, h_over_RT, s_over_R, cp0_over_R, dhf_over_R, s0_over_R, Tmid
-    ):
+    def fit_full(cls, data: ThermoData, Tmin, Tmax, Tcommon):
         """Fit NASA7 coefficients using cp, h, and s data simultaneously.
-
-        Args:
-            T: Temperature array
-            cp_over_R: Specific heat data (dimensionless)
-            h_over_RT: Enthalpy data (dimensionless)
-            s_over_R: Entropy data (dimensionless)
-            cp0_over_R: Standard-state cp/R at 298.15K
-            dhf_over_R: Standard-state enthalpy/R at 298.15K
-            s0_over_R: Standard-state entropy/R at 298.15K
-            Tmid: Midpoint temperature
-
         Returns:
             NASA7Polynomial instance
         """
-        T0 = np.asarray(T, dtype=float)
-        cp_over_R = np.asarray(cp_over_R, dtype=float)
-        h_over_RT = np.asarray(h_over_RT, dtype=float)
-        s_over_R = np.asarray(s_over_R, dtype=float)
-        Tmid = float(Tmid)
+        R = data.gas_constant
+        T = data.temperature
 
         # Find index closest to Tmid
-        Tc_i = int(np.argmin(np.abs(T0 - Tmid)))
-        Tcommon = T0[Tc_i]
-
-        T_low = T0[0 : Tc_i + 1]
-        T_high = T0[Tc_i:]
+        Tc_i = np.argmin(np.abs(T - Tcommon))
+        T_low = T[0 : Tc_i + 1]
+        T_high = T[Tc_i:]
         T_concat = np.concatenate((T_low, T_high))
+
+        cp_over_R = data.cp / R
+        h_over_RT = data.h / (R * T)
+        s_over_R = data.s / R
+
+        cp0_over_R = data.cp0 / R
+        dhf_over_R = data.dhf / R
+        s0_over_R = data.s0 / R
 
         cp_over_R_L = cp_over_R[0 : Tc_i + 1]
         cp_over_R_H = cp_over_R[Tc_i:]
@@ -376,58 +432,7 @@ class NASA7Polynomial:
             coeffs[i + 7] = coeffs_tmp[i + M]
 
         coeffs_corrected = cls._correct_coeffs(coeffs, Tcommon, dhf_over_R, s0_over_R)
-        return cls(coeffs_corrected[:7], coeffs_corrected[7:], Tmid)
-
-    @classmethod
-    def fit_auto(
-        cls,
-        T,
-        cp_over_R,
-        h_over_RT,
-        s_over_R,
-        cp0_over_R,
-        dhf_over_R,
-        s0_over_R,
-        Tmid,
-        verbose=False,
-    ):
-        """Smart fitting: try cp_only first, fall back to full if consistency fails.
-
-        Args:
-            T: Temperature array
-            cp_over_R: Specific heat data
-            h_over_RT: Enthalpy data (dimensionless)
-            s_over_R: Entropy data (dimensionless)
-            cp0_over_R: Standard-state cp/R at 298.15K
-            dhf_over_R: Standard-state enthalpy/R at 298.15K
-            s0_over_R: Standard-state entropy/R at 298.15K
-            Tmid: Midpoint temperature
-            verbose: If True, print fitting decisions
-
-        Returns:
-            NASA7Polynomial instance
-        """
-        # Try cp-only first
-        try:
-            nasa = cls.fit_cp_only(
-                T, cp_over_R, cp0_over_R, dhf_over_R, s0_over_R, Tmid
-            )
-            result = nasa.check_consistency(
-                T, cp_over_R, h_over_RT, s_over_R, abs_tol=0.1
-            )
-            if result["is_consistent"]:
-                if verbose:
-                    print("fit_auto: cp-only strategy succeeded")
-                return nasa
-        except Exception:
-            pass
-
-        # Fall back to full fit
-        if verbose:
-            print("fit_auto: using full strategy (cp-only failed)")
-        return cls.fit_full(
-            T, cp_over_R, h_over_RT, s_over_R, cp0_over_R, dhf_over_R, s0_over_R, Tmid
-        )
+        return cls(coeffs_corrected[:7], coeffs_corrected[7:], Tcommon, Tmin, Tmax)
 
     @staticmethod
     def _correct_coeffs(coeffs, Tcommon, dhf_over_R, s0_over_R):
@@ -498,51 +503,57 @@ class NASA7Polynomial:
 
         return coeffs
 
-    # -- quality checks --
-
-    def check_consistency(self, T, cp_over_R, h_over_RT, s_over_R, abs_tol=1e-6):
+    def fit_quality(self, data: ThermoData, error=False, tol=1e-6, tol_c0=1e-6):
         """Check L2 error of coefficients against reference data."""
-        dcp = np.abs(cp_over_R - self.cp_over_R(T))
-        err_cp = np.linalg.norm(dcp)
-        dh = np.abs(h_over_RT - self.h_over_RT(T))
-        err_h = np.linalg.norm(dh)
-        ds = np.abs(s_over_R - self.s_over_R(T))
-        err_s = np.linalg.norm(ds)
-        max_error = max(err_cp, err_h, err_s)
-        is_consistent = max_error < abs_tol
-        return {
-            "is_consistent": is_consistent,
-            "cp_error": float(err_cp),
-            "h_error": float(err_h),
-            "s_error": float(err_s),
-            "max_error": float(max_error),
+
+        # C0 / C1 continuity
+        c0 = self.continuity_error()
+
+        max_c0 = max(c0["cp"], c0["dcpdT"], c0["h"], c0["s"])
+
+        # Consistency with reference data
+        R = data.gas_constant
+        T = data.temperature
+        dcp = np.abs(data.cp/R - self.cp_over_R(T))
+        err_cp = np.linalg.norm(dcp) / np.linalg.norm(data.cp/R)
+        dh = np.abs(data.h/(R*T) - self.h_over_RT(T))
+        err_h = np.linalg.norm(dh) / np.linalg.norm(data.h/(R*T))
+        ds = np.abs(data.s/R - self.s_over_R(T))
+        err_s = np.linalg.norm(ds) / np.linalg.norm(data.s/R)
+
+        max_err = max(err_cp, err_h, err_s)
+
+        quality = {
+            "c0_continuity": c0,
+            "consistency": {"cp_error": err_cp, "h_error": err_h, "s_error": err_s},
         }
 
-    def check_continuity(self, cp_tol=1e-6, cpdT_tol=0.01, h_tol=1e-6, s_tol=1e-6):
-        """Check C0/C1 continuity at Tmid."""
-        Tm = self.Tmid
-        cp_jump = float(
-            np.abs(self._cp(self.coeffs_low, Tm) - self._cp(self.coeffs_high, Tm))
-        )
-        cpdT_jump = float(
-            np.abs(self._dcpdT(self.coeffs_low, Tm) - self._dcpdT(self.coeffs_high, Tm))
-        )
-        h_jump = float(
-            np.abs(self._h(self.coeffs_low, Tm) - self._h(self.coeffs_high, Tm))
-        )
-        s_jump = float(
-            np.abs(self._s(self.coeffs_low, Tm) - self._s(self.coeffs_high, Tm))
-        )
-        is_continuous = (
-            (cp_jump < cp_tol)
-            and (cpdT_jump < cpdT_tol)
-            and (h_jump < h_tol)
-            and (s_jump < s_tol)
-        )
-        return {
-            "is_continuous": is_continuous,
-            "cp_jump": cp_jump,
-            "cpdT_jump": cpdT_jump,
-            "h_jump": h_jump,
-            "s_jump": s_jump,
-        }
+        if error and (max_c0 > tol_c0 or max_err > tol):
+            raise ValueError(
+                f"NASA7 polynomial quality failed with tol={tol}."
+                f"Overall fit quality is as follows:\n{quality}"
+            )
+
+        return quality
+
+    def c0_continuity(self, func: Callable):
+        """
+        Evaluate C0 continuity for a given function
+        """
+        val_low = func(self.coeffs_low, self.Tmid)
+        val_high = func(self.coeffs_high, self.Tmid)
+
+        return np.abs(val_low - val_high) / np.abs(val_low)
+
+    def continuity_error(self) -> dict:
+        # C0 / C1 continuity
+        cp_c0 = self.c0_continuity(func=self._cp)
+        dcpdT_c0 = self.c0_continuity(func=self._dcpdT)
+        h_c0 = self.c0_continuity(func=self._h)
+        s_c0 = self.c0_continuity(func=self._s)
+        quality = {"cp": cp_c0, "dcpdT": dcpdT_c0, "h": h_c0, "s": s_c0}
+        return quality
+
+    def is_c0_continuous(self, tol=1e-6) -> bool:
+        quality = self.continuity_error()
+        return max(quality["cp"], quality["dcpdT"], quality["h"], quality["s"]) < tol

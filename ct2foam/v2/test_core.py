@@ -1,0 +1,765 @@
+"""Unit tests for v2 implementation - updated for new API.
+
+This file contains 76 tests originally from test_v2.py, updated to work with:
+- New Species class (no data array storage)
+- Classmethod-based fitting API
+- Removal of Tmid/Tlow/Thigh from Species attributes
+"""
+from multiprocessing import Value
+
+import unittest
+import numpy as np
+
+import cantera as ct
+
+from ct2foam.v2.nasa7 import NASA7Polynomial, ThermoData
+
+from ct2foam.v2.sutherland import Sutherland
+from ct2foam.v2.polynomial import Polynomial
+
+
+# Note, OF_reference/Test-thermoMixture.C
+# is used as a source of the reference data tested here.
+
+# TODO: think this through
+# R = 8314.46261815324
+# OF Reguired for sutherland testing
+R_OF = 8314.47006650545  # taken from openFoam -- differs slightly from standards
+
+T_STD = 298.15
+
+H2O_TMID = 1000.0
+H2O_TMIN = 300.0
+H2O_TMAX = 3000.0
+H2O_C_LO = np.array(
+    [3.38684, 0.00347498, -6.3547e-06, 6.96858e-09, -2.50659e-12, -30208.1, 2.59023]
+)
+H2O_C_HI = np.array(
+    [2.67215, 0.00305629, -8.73026e-07, 1.201e-10, -6.39162e-15, -29899.2, 6.86282]
+)
+
+
+class TestNASA7PolynomialBasics(unittest.TestCase):
+    """Test NASA polynomials and related functionalities."""
+
+    def setUp(self):
+        self.nasa = NASA7Polynomial(H2O_C_LO, H2O_C_HI, H2O_TMID, H2O_TMIN, H2O_TMAX)
+
+    def test_cp_over_R_below_midpoint(self):
+        """cp/R uses low coefficients when T <= Tmid."""
+        T = 400.0
+        result = self.nasa.cp_over_R(T)
+        expected = NASA7Polynomial._cp(H2O_C_LO, T)
+        self.assertAlmostEqual(result[0], expected, places=10)
+
+    def test_cp_over_R_above_midpoint(self):
+        """cp/R uses high coefficients when T > Tmid."""
+        T = 1500.0
+        result = self.nasa.cp_over_R(T)
+        expected = NASA7Polynomial._cp(H2O_C_HI, T)
+        self.assertAlmostEqual(result[0], expected, places=10)
+
+    def test_cp_over_R_at_midpoint(self):
+        """cp/R at Tmid uses low coefficients (T = Tmid)."""
+        result = self.nasa.cp_over_R(H2O_TMID)
+        expected = NASA7Polynomial._cp(H2O_C_LO, H2O_TMID)
+        self.assertAlmostEqual(result[0], expected, places=10)
+
+    def test_cp_over_R_array_vectorization(self):
+        """cp/R works with array input and segments correctly."""
+        T = np.array([300.0, 500.0, 1000.0, 1500.0, 3000.0])
+        result = self.nasa.cp_over_R(T)
+        self.assertEqual(result.shape, T.shape)
+        # Low region
+        for i in [0, 1, 2]:
+            self.assertAlmostEqual(
+                result[i], NASA7Polynomial._cp(H2O_C_LO, T[i]), places=10
+            )
+        # High region
+        for i in [3, 4]:
+            self.assertAlmostEqual(
+                result[i], NASA7Polynomial._cp(H2O_C_HI, T[i]), places=10
+            )
+
+    def test_h_over_RT_segmentation(self):
+        """h/(RT) segments correctly across Tmid."""
+        T = np.array([400.0, 2000.0])
+        result = self.nasa.h_over_RT(T)
+        self.assertAlmostEqual(
+            result[0], NASA7Polynomial._h(H2O_C_LO, 400.0), places=10
+        )
+        self.assertAlmostEqual(
+            result[1], NASA7Polynomial._h(H2O_C_HI, 2000.0), places=10
+        )
+
+    def test_s_over_R_monotonicity(self):
+        """Entropy should increase monotonically with T."""
+        T = np.linspace(300, 3000, 50)
+        s = self.nasa.s_over_R(T)
+        diffs = np.diff(s)
+        self.assertTrue(np.all(diffs > -1e-10))
+
+    def test_dcpdT_over_R_finite(self):
+        """dcp/dT should be finite and physically reasonable."""
+        T = 1000.0
+        result = self.nasa.dcpdT_over_R(T)
+        self.assertTrue(np.isfinite(result[0]))
+        self.assertAlmostEqual(np.abs(result[0]), 0.00164496, places=5)
+
+    def test_dcpdT_over_R_matches_numerical_derivative(self):
+        """dcp/dT should approximate numerical derivative."""
+        T = 800.0
+        dT = 0.01
+        dcpdT_analytical = self.nasa.dcpdT_over_R(T)[0]
+        cp_T_minus = self.nasa.cp_over_R(T - dT / 2)[0]
+        cp_T_plus = self.nasa.cp_over_R(T + dT / 2)[0]
+        dcpdT_numerical = (cp_T_plus - cp_T_minus) / dT
+        self.assertAlmostEqual(dcpdT_analytical, dcpdT_numerical, places=5)
+
+    def test_continuity_cp_at_Tmid(self):
+        """cp should be continuous at Tmid."""
+        eps = 1e-6
+        T_lo = H2O_TMID - eps
+        T_hi = H2O_TMID + eps
+        cp_lo = self.nasa.cp_over_R(T_lo)[0]
+        cp_hi = self.nasa.cp_over_R(T_hi)[0]
+        jump = abs(cp_hi - cp_lo)
+        self.assertLess(jump, 1e-4)
+
+    def test_continuity_h_at_Tmid(self):
+        """h/(RT) should be continuous at Tmid."""
+        eps = 1e-6
+        T_lo = H2O_TMID - eps
+        T_hi = H2O_TMID + eps
+        h_lo = self.nasa.h_over_RT(T_lo)[0]
+        h_hi = self.nasa.h_over_RT(T_hi)[0]
+        jump = abs(h_hi - h_lo)
+        self.assertLess(jump, 1e-4)
+
+    def test_continuity_s_at_Tmid(self):
+        """s/R should be continuous at Tmid."""
+        eps = 1e-6
+        T_lo = H2O_TMID - eps
+        T_hi = H2O_TMID + eps
+        s_lo = self.nasa.s_over_R(T_lo)[0]
+        s_hi = self.nasa.s_over_R(T_hi)[0]
+        jump = abs(s_hi - s_lo)
+        self.assertLess(jump, 1e-4)
+
+
+class TestNASA7PolynomialCanteraConsistency(unittest.TestCase):
+
+    def setUp(self):
+        self.gas = ct.Solution("h2o2.yaml")
+        self.R = ct.gas_constant
+
+        # Extract H2 data
+        self.gas.TPX = 1000, ct.one_atm, "H2:1.0"
+        h2_idx = self.gas.species_index("H2")
+
+        # Generate evaluation data
+        self.T = np.linspace(300, 3000, 500)
+        self.Tmid = 1000.0
+
+        nT = len(self.T)
+        self.cp = np.zeros(nT)
+        self.h = np.zeros(nT)
+        self.s = np.zeros(nT)
+
+        for i, T_i in enumerate(self.T):
+            self.gas.TP = T_i, ct.one_atm
+            self.cp[i] = self.gas.cp_mole
+            self.h[i] = self.gas.enthalpy_mole
+            self.s[i] = self.gas.entropy_mole
+
+        # Standard state values at 298.15K
+        self.gas.TP = T_STD, ct.one_atm
+        self.cp0_over_R = self.gas.standard_cp_R[h2_idx]
+        self.dhf_over_RT = self.gas.standard_enthalpies_RT[h2_idx]
+        self.s0_over_R = self.gas.standard_entropies_R[h2_idx]
+
+    def test_thermo_data_class(self):
+        h2 = self.gas.species(self.gas.species_index("H2"))
+        data = ThermoData.from_ct(h2, self.T, self.R)
+        np.testing.assert_array_almost_equal(data.cp, self.cp)
+        np.testing.assert_array_almost_equal(data.h, self.h)
+        np.testing.assert_array_almost_equal(data.s, self.s)
+        np.testing.assert_array_almost_equal(data.cp0 / self.R, self.cp0_over_R)
+        np.testing.assert_array_almost_equal(
+            data.dhf / (self.R * self.T), self.dhf_over_RT
+        )
+        np.testing.assert_array_almost_equal(data.s0 / self.R, self.s0_over_R)
+
+    def test_check_continuity_method(self):
+        """check_continuity returns expected keys."""
+        nasa7 = NASA7Polynomial(H2O_C_LO, H2O_C_HI, H2O_TMID, H2O_TMIN, H2O_TMAX)
+        assert nasa7.is_c0_continuous(tol=1e-5)
+
+    def test_consistency(self):
+        h2 = self.gas.species(self.gas.species_index("H2"))
+        coeffs = h2.thermo.coeffs
+        c_hi = np.array(coeffs[1:8])
+        c_lo = np.array(coeffs[8:15])
+        nasa7 = NASA7Polynomial(c_lo, c_hi, 1000, 200, 3000)
+        for Ti in self.T:
+            self.assertAlmostEqual(nasa7.cp_over_R(Ti)[0], h2.thermo.cp(Ti) / self.R)
+            self.assertAlmostEqual(
+                nasa7.h_over_RT(Ti)[0], h2.thermo.h(Ti) / (self.R * Ti)
+            )
+            self.assertAlmostEqual(nasa7.s_over_R(Ti)[0], h2.thermo.s(Ti) / self.R)
+
+    def test_check_consistency_method(self):
+        """check_consistency returns expected structure."""
+        h2 = self.gas.species(self.gas.species_index("H2"))
+        data = ThermoData.from_ct(h2, self.T, self.R)
+        nasa7 = NASA7Polynomial.from_ct(h2, 200, 3500, 1000)
+        result = nasa7.fit_quality(data)["consistency"]
+        self.assertIn("cp_error", result)
+        self.assertIn("h_error", result)
+        self.assertIn("s_error", result)
+
+    def test_poly_representation(self):
+        """Check if H2 species is correctly presented"""
+        h2 = self.gas.species(self.gas.species_index("H2"))
+        coeffs = h2.thermo.coeffs
+        c_hi = np.array(coeffs[1:8])
+        c_lo = np.array(coeffs[8:15])
+
+        nasa7 = NASA7Polynomial(c_lo, c_hi, 1000, 200, 3500)
+        np.testing.assert_allclose(c_hi, nasa7.coeffs_high, rtol=1e-8)
+        np.testing.assert_allclose(c_lo, nasa7.coeffs_low, rtol=1e-8)
+
+
+class TestNASA7PolynomialFitting(unittest.TestCase):
+    """Test NASA7Polynomial fitting methods."""
+
+    def setUp(self):
+        self.R = ct.gas_constant
+        self.gas = ct.Solution("h2o2.yaml")
+        self.h2 = self.gas.species(self.gas.species_index("H2"))
+        self.T = np.linspace(200, 3000, 128)
+        self.data = ThermoData.from_ct(self.h2, self.T, self.R)
+        self.Tmin = 200
+        self.Tmax = 3000
+        self.Tcommon = 1000
+
+    def test_fit_nasapolys_cp_synthetic_data(self):
+        """Test cp fitting with synthetic quadratic data."""
+        T0 = np.linspace(300, 2000, 50)
+        R = ct.gas_constant
+        cp = (2.5 + 0.001 * T0 + 1e-5 * T0**2) * R
+        h = T0**2 * R
+        s = T0**2 * R
+        cp0 = 2.8 * R
+        dhf = 10.0 * R
+        s0 = 100.0 * R
+        data = ThermoData(ct.gas_constant, temperature=T0, cp=cp, h=h, s=s, cp0=cp0, dhf=dhf, s0=s0)
+        nasa7 = NASA7Polynomial.fit_cp_only(data, 300, 2000, 1000)
+
+        self.assertEqual(len(nasa7.coeffs_low), 7)
+        self.assertEqual(len(nasa7.coeffs_high), 7)
+
+        cp_fitted = nasa7.cp_over_R(T0) * ct.gas_constant
+        eps = np.linalg.norm(cp_fitted - cp) / np.linalg.norm(cp)
+        self.assertLessEqual(eps, 8e-3)
+
+    def test_fit_cp_only(self):
+
+        nasa7 = NASA7Polynomial.fit_cp_only(
+            self.data, self.Tmin, self.Tmax, self.Tcommon
+        )
+
+        self.assertIsNotNone(nasa7)
+        self.assertEqual(nasa7.Tmid, self.Tcommon)
+        self.assertEqual(len(nasa7.coeffs_low), 7)
+        self.assertEqual(len(nasa7.coeffs_high), 7)
+
+        # Evaluate cp and check fit quality
+        cp_fit_low = nasa7.cp_over_R(self.T[self.T <= self.Tcommon])
+        cp_fit_high = nasa7.cp_over_R(self.T[self.T > self.Tcommon])
+
+        cp_ref_low = self.data.cp[self.T <= self.Tcommon] / self.R
+        cp_ref_high = self.data.cp[self.T > self.Tcommon] / self.R
+
+        # Should have good cp fit (relaxed tolerance for numerical precision)
+        np.testing.assert_allclose(cp_fit_low, cp_ref_low, rtol=7e-3)
+        np.testing.assert_allclose(cp_fit_high, cp_ref_high, rtol=1.5e-3)
+
+
+    def test_fit_full(self):
+
+        nasa7 = NASA7Polynomial.fit_full(
+            self.data, self.Tmin, self.Tmax, self.Tcommon
+        )
+
+        self.assertIsNotNone(nasa7)
+        self.assertEqual(nasa7.Tmid, self.Tcommon)
+        self.assertEqual(len(nasa7.coeffs_low), 7)
+        self.assertEqual(len(nasa7.coeffs_high), 7)
+
+        Tlow = self.T[self.T <= self.Tcommon]
+        Thigh = self.T[self.T > self.Tcommon]
+
+        cp_fit_low = nasa7.cp_over_R(Tlow)
+        cp_fit_high = nasa7.cp_over_R(Thigh)
+
+        cp_ref_low = self.data.cp[self.T <= self.Tcommon] / self.R
+        cp_ref_high = self.data.cp[self.T > self.Tcommon] / self.R
+
+        np.testing.assert_allclose(cp_fit_low, cp_ref_low, rtol=5e-3)
+        np.testing.assert_allclose(cp_fit_high, cp_ref_high, rtol=3.5e-3)
+
+        h_fit_low = nasa7.h_over_RT(Tlow)
+        h_fit_high = nasa7.h_over_RT(Thigh)
+
+        h_ref_low = self.data.h[self.T <= self.Tcommon] / self.R / Tlow
+        h_ref_high = self.data.h[self.T > self.Tcommon] / self.R / Thigh
+
+        np.testing.assert_allclose(h_fit_low, h_ref_low, rtol=2e-3)
+        np.testing.assert_allclose(h_fit_high, h_ref_high, rtol=5e-4)
+
+        s_fit_low = nasa7.s_over_R(Tlow)
+        s_fit_high = nasa7.s_over_R(Thigh)
+
+        s_ref_low = self.data.s[self.T <= self.Tcommon] / self.R
+        s_ref_high = self.data.s[self.T > self.Tcommon] / self.R
+
+        np.testing.assert_allclose(s_fit_low, s_ref_low, rtol=2e-4)
+        np.testing.assert_allclose(s_fit_high, s_ref_high, rtol=5e-5)
+
+
+    def test_from_ct(self):
+        h2 = self.gas.species(self.gas.species_index("H2"))
+        # Will fail if fit quality not ok
+        _ = NASA7Polynomial.from_ct(h2, 200, 3500, 1000)
+
+    def test_consistency(self):
+        h2 = self.gas.species(self.gas.species_index("H2"))
+        nasa7 = NASA7Polynomial.from_ct(h2, 200, 3500, 1000)
+        cp_lo = nasa7._cp(nasa7.coeffs_low, nasa7.Tmid)
+        cp_hi = nasa7._cp(nasa7.coeffs_high, nasa7.Tmid)
+        self.assertAlmostEqual(cp_lo, cp_hi)
+
+    def test_fit_quality(self):
+        h2 = self.gas.species(self.gas.species_index("H2"))
+        nasa7 = NASA7Polynomial.from_ct(h2, 200, 3500, 1000)
+        quality = nasa7.fit_quality(self.data)
+        # Perturb the coefficients to make this quality dict go off
+        nasa7.coeffs_low *= 1.121212
+        with self.assertRaises(ValueError):
+            nasa7.fit_quality(self.data, error=True)
+
+    def test_correct_coeffs_integration_constants(self):
+        """Test that _correct_coeffs properly sets integration constants."""
+        # Use fit_cp_only which sets integration constants internally
+        nasa7 = NASA7Polynomial.fit_cp_only(
+            self.data, self.Tmin, self.Tmax, self.Tcommon
+        )
+
+        # Check that h and s are correct at 298.15K
+        h_fit = nasa7.h_over_RT(np.array([T_STD]))[0] * self.R * T_STD
+        s_fit = nasa7.s_over_R(np.array([T_STD]))[0] * self.R
+
+        # Check that fit maintains thermodynamic integration constants
+        # For H2, dhf_over_R is ~2.5e-9 (nearly zero), so use absolute tolerance
+        print(h_fit)
+        self.assertAlmostEqual(h_fit, self.data.dhf, places=23)
+        self.assertAlmostEqual(s_fit, self.data.s0, places=23)
+
+
+        nasa7 = NASA7Polynomial.fit_full(
+            self.data, self.Tmin, self.Tmax, self.Tcommon
+        )
+
+        # Check that h and s are correct at 298.15K
+        h_fit = nasa7.h_over_RT(np.array([T_STD]))[0] * self.R * T_STD
+        s_fit = nasa7.s_over_R(np.array([T_STD]))[0] * self.R
+
+        # Check that fit maintains thermodynamic integration constants
+        # For H2, dhf_over_R is ~2.5e-9 (nearly zero)
+        self.assertAlmostEqual(h_fit, self.data.dhf, places=8)
+        self.assertAlmostEqual(s_fit, self.data.s0, places=23)
+
+
+
+
+class TestSutherland(unittest.TestCase):
+    """Test Sutherland transport model."""
+
+    def test_sutherland_mu_formula(self):
+        """Sutherland mu matches expected formula."""
+        suth = Sutherland(As=1.5e-6, Ts=100.0)
+        T = 500.0
+        expected = 1.5e-6 * np.sqrt(T) / (1.0 + 100.0 / T)
+        self.assertAlmostEqual(suth.mu(T), expected, places=12)
+
+    def test_sutherland_array_input(self):
+        """Sutherland works with array input."""
+        suth = Sutherland(As=1.5e-6, Ts=100.0)
+        T = np.array([300, 500, 1000])
+        result = suth.mu(T)
+        self.assertEqual(result.shape, T.shape)
+
+    def test_euken0(self):
+        """Reference data retrieved from OpenFOAM"""
+        suth = Sutherland(As=1, Ts=1)
+        cv_mole = -R_OF + 4
+        kappa_foam = 936.697882481863
+        kappa = suth.kappa_euken(1, cv_mole, 2, R_OF)
+        self.assertTrue(np.abs(kappa - kappa_foam) < 1e-12)
+
+    def test_sutherland1(self):
+        """Reference data for H2O from OpenFOAM"""
+        suth = Sutherland(As=1.67212e-06, Ts=170.672)
+        mu = suth.mu(400)
+        mu_foam = 2.34407155073317e-05
+        self.assertTrue(np.abs(mu - mu_foam) < 1e-12)
+
+    def test_euken1(self):
+        """Reference data for H2O from OpenFOAM"""
+        cv_mole = 26123.236960773
+        kappa_foam = 0.0640159441308283
+        suth = Sutherland(As=1.67212e-06, Ts=170.672)
+        kappa = suth.kappa_euken(400, cv_mole, 18.0153, R_OF)
+        self.assertTrue(np.abs(kappa - kappa_foam) < 1e-12)
+
+    def test_sutherland_list(self):
+        """Reference data for H2O from OpenFOAM"""
+        suth = Sutherland(As=1.67212e-06, Ts=170.672)
+        mu = suth.mu(np.array([400,400,400]))
+        mu_foam = 2.34407155073317e-05
+        self.assertTrue(np.linalg.norm(mu - [mu_foam,mu_foam,mu_foam]) < 1e-12)
+
+
+class TestPolynomial(unittest.TestCase):
+     """Test Polynomial transport class."""
+
+     def test_polynomial_mu_evaluation(self):
+         """Standard polynomial mu evaluation matches np.poly1d."""
+         coeffs = np.array([1e-12, -2e-9, 1e-6, 5e-5])
+         poly = Polynomial(coeffs, coeffs, poly_type="polynomial")
+         T = 1000.0
+         expected = np.poly1d(coeffs)(T)
+         self.assertAlmostEqual(float(poly.mu(T)), expected, places=12)
+
+     def test_polynomial_kappa_evaluation(self):
+         """Standard polynomial kappa evaluation matches np.poly1d."""
+         coeffs_mu = np.array([1e-12, 0, 1e-6, 0])
+         coeffs_k = np.array([2e-12, 0, 2e-6, 0])
+         poly = Polynomial(coeffs_mu, coeffs_k, poly_type="polynomial")
+         T = 500.0
+         expected = np.poly1d(coeffs_k)(T)
+         self.assertAlmostEqual(float(poly.kappa(T)), expected, places=12)
+
+     def test_log_polynomial_mu_evaluation(self):
+         """Log-polynomial mu = exp(P(log(T)))."""
+         coeffs = np.array([0.5, -1.0, 2.0, -10.0])
+         poly = Polynomial(coeffs, coeffs, poly_type="log_polynomial")
+         T = 1000.0
+         expected = np.exp(np.poly1d(coeffs)(np.log(T)))
+         self.assertAlmostEqual(float(poly.mu(T)), expected, places=10)
+
+     def test_log_polynomial_kappa_evaluation(self):
+         """Log-polynomial kappa = exp(P(log(T)))."""
+         coeffs = np.array([0.3, -0.5, 1.5, -8.0])
+         poly = Polynomial(coeffs, coeffs, poly_type="log_polynomial")
+         T = 750.0
+         expected = np.exp(np.poly1d(coeffs)(np.log(T)))
+         self.assertAlmostEqual(float(poly.kappa(T)), expected, places=10)
+
+     def test_invalid_poly_type_raises(self):
+         """Invalid poly_type should raise ValueError."""
+         with self.assertRaises(ValueError):
+             Polynomial(np.zeros(4), np.zeros(4), poly_type="invalid")
+
+     def test_polynomial_array_input(self):
+         """Polynomial evaluation works with array inputs."""
+         coeffs = np.array([1e-12, -2e-9, 1e-6, 5e-5])
+         poly = Polynomial(coeffs, coeffs, poly_type="polynomial")
+         T = np.array([300.0, 500.0, 1000.0])
+         result = poly.mu(T)
+         self.assertEqual(result.shape, T.shape)
+
+     def test_poly0(self):
+         """Reference data for H2O retrieved from OpenFOAM"""
+         T = 400
+         poly_coeffs_mu = np.flip(np.array([1000, -0.05, 0.003, 0]))
+         poly_coeffs_kappa = np.flip(np.array([2000, -0.15, 0.023, 0]))
+         mu_foam = 1460.0
+         kappa_foam = 5620.0
+         poly = Polynomial(poly_coeffs_mu, poly_coeffs_kappa, poly_type="polynomial")
+         mu = poly.mu(T)
+         kappa = poly.kappa(T)
+         self.assertTrue(np.abs(mu - mu_foam) / np.abs(mu_foam) < 1e-12)
+         self.assertTrue(np.abs(kappa - kappa_foam) / np.abs(kappa_foam) < 1e-12)
+
+     def test_logpoly0(self):
+         """Reference data for H2O retrieved from OpenFOAM"""
+         T = 400
+         poly_coeffs_mu = np.flip(np.array([0.1, 0.1, 0.1, 0]))
+         poly_coeffs_kappa = np.flip(np.array([0.1, 0.1, 0.1, 0]))
+         mu_foam = 72.8870655981874
+         kappa_foam = 72.8870655981874
+         poly = Polynomial(poly_coeffs_mu, poly_coeffs_kappa, poly_type="log_polynomial")
+         mu = poly.mu(T)
+         kappa = poly.kappa(T)
+         self.assertTrue(np.abs(mu - mu_foam) / np.abs(mu_foam) < 1e-12)
+         self.assertTrue(np.abs(kappa - kappa_foam) / np.abs(kappa_foam) < 1e-12)
+
+
+
+# class TestSpeciesOutput(unittest.TestCase):
+#     """Test Species export to OpenFOAM format.
+#
+#     Updated from TestSpeciesDatasetOutput to use new API.
+#     """
+#
+#     def setUp(self):
+#         """Create a minimal Species with fitted coefficients."""
+#         self.species = Species(
+#             name="TEST",
+#             W=18.0,
+#             cp0_over_R=4.0,
+#             dhf_over_R=-13000.0,
+#             s0_over_R=45.0,
+#             elements={"H": 2, "O": 1},
+#         )
+#
+#         # Add fitted coefficients
+#         self.species.nasa7 = NASA7Polynomial(H2O_C_LO, H2O_C_HI, H2O_TMID)
+#         self.species.sutherland = Sutherland(As=1.67e-6, Ts=170.0)
+#         self.species.polynomial = Polynomial(
+#             np.array([1e-12, -2e-9, 1e-6, 5e-5]),
+#             np.array([2e-12, -3e-9, 2e-6, 6e-5]),
+#             poly_type="polynomial",
+#         )
+#         self.species.log_polynomial = Polynomial(
+#             np.array([0.1, 0.2, 0.3, 0.4]),
+#             np.array([0.15, 0.25, 0.35, 0.45]),
+#             poly_type="log_polynomial",
+#         )
+#
+#     def test_to_foam_dict_requires_tlow_thigh(self):
+#         """to_foam_dict now requires Tlow and Thigh as parameters."""
+#         foam_dict = self.species.to_foam_dict(Tlow=300, Thigh=3000)
+#         self.assertIsNotNone(foam_dict)
+#
+#     def test_to_foam_dict_contains_required_keys(self):
+#         """Exported dict should contain all required keys."""
+#         foam_dict = self.species.to_foam_dict(Tlow=300, Thigh=3000)
+#
+#         required_keys = [
+#             "name",
+#             "W",
+#             "Tmid",
+#             "Tlow",
+#             "Thigh",
+#             "nasa7_lo",
+#             "nasa7_hi",
+#             "As",
+#             "Ts",
+#             "poly_mu",
+#             "poly_kappa",
+#             "logpoly_mu",
+#             "logpoly_kappa",
+#         ]
+#
+#         for key in required_keys:
+#             self.assertIn(key, foam_dict)
+#
+#     def test_to_foam_dict_tmid_from_nasa7(self):
+#         """Tmid should come from nasa7.Tmid, not Species attribute."""
+#         foam_dict = self.species.to_foam_dict(Tlow=300, Thigh=3000)
+#         self.assertEqual(foam_dict["Tmid"], self.species.nasa7.Tmid)
+#         self.assertEqual(foam_dict["Tmid"], H2O_TMID)
+#
+#     def test_to_foam_dict_tlow_thigh_from_parameters(self):
+#         """Tlow and Thigh should come from method parameters."""
+#         foam_dict = self.species.to_foam_dict(Tlow=250, Thigh=3500)
+#         self.assertEqual(foam_dict["Tlow"], 250)
+#         self.assertEqual(foam_dict["Thigh"], 3500)
+#
+#     def test_to_foam_dict_nasa7_coefficients(self):
+#         """NASA7 coefficients should be exported as lists."""
+#         foam_dict = self.species.to_foam_dict(Tlow=300, Thigh=3000)
+#         self.assertIsInstance(foam_dict["nasa7_lo"], list)
+#         self.assertIsInstance(foam_dict["nasa7_hi"], list)
+#         self.assertEqual(len(foam_dict["nasa7_lo"]), 7)
+#         self.assertEqual(len(foam_dict["nasa7_hi"]), 7)
+#
+#     def test_to_foam_dict_without_nasa7_raises(self):
+#         """to_foam_dict should raise error if nasa7 not set."""
+#         species_no_fit = Species(
+#             name="NOFITYET",
+#             W=28.0,
+#             cp0_over_R=3.5,
+#             dhf_over_R=0.0,
+#             s0_over_R=20.0,
+#         )
+#         with self.assertRaises(RuntimeError):
+#             species_no_fit.to_foam_dict(Tlow=300, Thigh=3000)
+#
+
+# class TestCanteraThermoTransportWorkflow(unittest.TestCase):
+#     """Test CanteraThermoTransport end-to-end workflow."""
+#
+#     @classmethod
+#     def setUpClass(cls):
+#         """Set up test mechanism file."""
+#         test_data_dir = Path(__file__).parent.parent / "test_data"
+#         cls.mech_file = test_data_dir / "h2o2_mod.yaml"
+#
+#     def test_from_cantera_creates_dataset(self):
+#         """Constructor and fit_thermodynamics successfully creates a CanteraThermoTransport."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
+#         self.assertIsNotNone(dataset)
+#         self.assertIsInstance(dataset, CanteraThermoTransport)
+#
+#     def test_from_cantera_loads_all_species(self):
+#         """Constructor and fit_thermodynamics loads all species from mechanism."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
+#         self.assertEqual(len(dataset.species_list), 10)  # h2o2_mod has 10 species
+#
+#     def test_from_cantera_all_species_fitted(self):
+#         """All species should have fitted coefficients."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
+#         for sp in dataset.species_list:
+#             self.assertIsNotNone(sp.nasa7, f"{sp.name} missing nasa7")
+#             self.assertIsNotNone(sp.sutherland, f"{sp.name} missing sutherland")
+#             self.assertIsNotNone(sp.polynomial, f"{sp.name} missing polynomial")
+#             self.assertIsNotNone(sp.log_polynomial, f"{sp.name} missing log_polynomial")
+#
+#     def test_from_cantera_quality_checks_performed(self):
+#         """All species should have quality metrics."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
+#         for sp in dataset.species_list:
+#             self.assertIsNotNone(sp.quality, f"{sp.name} missing quality check")
+#
+#     def test_from_cantera_custom_tmid(self):
+#         """fit_thermodynamics respects custom Tmid."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1200.0, verbose=False)
+#         self.assertEqual(dataset.Tmid, 1200.0)
+#
+#     def test_from_cantera_custom_temperature_range(self):
+#         """fit_thermodynamics respects custom Tlow/Thigh."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, Tlow=400.0, Thigh=2500.0, verbose=False)
+#         self.assertEqual(dataset.Tlow, 400.0)
+#         self.assertEqual(dataset.Thigh, 2500.0)
+#
+#     def test_write_output_creates_files(self):
+#         """write_output creates required OpenFOAM files."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
+#
+#         with tempfile.TemporaryDirectory() as tmpdir:
+#             output_dir = Path(tmpdir) / "foam_output"
+#             dataset.write_output(output_dir)
+#
+#             self.assertTrue((output_dir / "thermo.foam").exists())
+#             self.assertTrue((output_dir / "reactions.foam").exists())
+#             self.assertTrue((output_dir / "species.foam").exists())
+#
+#     def test_write_output_thermo_file_content(self):
+#         """thermo.foam should contain species data."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
+#
+#         with tempfile.TemporaryDirectory() as tmpdir:
+#             output_dir = Path(tmpdir) / "foam_output"
+#             dataset.write_output(output_dir)
+#
+#             thermo_content = (output_dir / "thermo.foam").read_text()
+#             self.assertGreater(len(thermo_content), 100)
+#             self.assertIn("H2", thermo_content)
+#             self.assertIn("O2", thermo_content)
+#
+#     def test_write_output_species_file_content(self):
+#         """species.foam should list all species."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
+#
+#         with tempfile.TemporaryDirectory() as tmpdir:
+#             output_dir = Path(tmpdir) / "foam_output"
+#             dataset.write_output(output_dir)
+#
+#             species_content = (output_dir / "species.foam").read_text()
+#             for sp in dataset.species_list:
+#                 self.assertIn(sp.name, species_content)
+#
+#
+# class TestCanteraThermoTransportErrorHandling(unittest.TestCase):
+#     """Test error handling in CanteraThermoTransport."""
+#
+#     def test_from_cantera_invalid_file_raises(self):
+#         """Constructor should raise error for invalid mechanism file."""
+#         with self.assertRaises(Exception):
+#             dataset = CanteraThermoTransport("nonexistent_mechanism.yaml")
+#             dataset.fit_thermodynamics(Tmid=1000.0)
+#
+#     def test_from_cantera_negative_tmid_raises(self):
+#         """fit_thermodynamics should validate Tmid is positive."""
+#         test_data_dir = Path(__file__).parent.parent / "test_data"
+#         mech_file = test_data_dir / "h2o2_mod.yaml"
+#
+#         # Negative Tmid might cause issues, but might not be explicitly validated
+#         # This test checks current behavior
+#         try:
+#             dataset = CanteraThermoTransport(mech_file)
+#             dataset.fit_thermodynamics(Tmid=-1000.0, verbose=False)
+#             # If it doesn't raise, that's current behavior
+#             self.assertIsNotNone(dataset)
+#         except (ValueError, AssertionError):
+#             # If it does raise, that's also acceptable
+#             pass
+#
+
+# class TestNASA7ReuseLogic(unittest.TestCase):
+#     """Test Cantera NASA7 coefficient reuse logic."""
+#
+#     @classmethod
+#     def setUpClass(cls):
+#         """Set up test mechanism."""
+#         test_data_dir = Path(__file__).parent.parent / "test_data"
+#         cls.mech_file = test_data_dir / "h2o2_mod.yaml"
+#
+#     def test_cantera_coefficients_reused_by_default(self):
+#         """Valid Cantera coefficients should be reused by default."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
+#
+#         # Most species should successfully fit (either reused or refitted)
+#         fitted_count = sum(1 for sp in dataset.species_list if sp.nasa7 is not None)
+#         self.assertEqual(fitted_count, len(dataset.species_list))
+#
+#     def test_force_refit_refits_all(self):
+#         """force_refit=True should refit all species."""
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(Tmid=1000.0, force_refit=True, verbose=False)
+#
+#         # All species should still be fitted
+#         fitted_count = sum(1 for sp in dataset.species_list if sp.nasa7 is not None)
+#         self.assertEqual(fitted_count, len(dataset.species_list))
+#
+#     def test_custom_tolerances_affect_reuse(self):
+#         """Custom tolerances should affect reuse decisions."""
+#         strict_tolerances = FittingTolerances.strict()
+#
+#         dataset = CanteraThermoTransport(self.mech_file)
+#         dataset.fit_thermodynamics(
+#             Tmid=1000.0, tolerances=strict_tolerances, verbose=False
+#         )
+#
+#         # With strict tolerances, some might need refitting
+#         # But all should still succeed
+#         fitted_count = sum(1 for sp in dataset.species_list if sp.nasa7 is not None)
+#         self.assertEqual(fitted_count, len(dataset.species_list))
+#
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,8 +1,9 @@
 """Standard or log-polynomial transport models."""
 
 import numpy as np
+import cantera as ct
 
-
+# TODO: Divide this to two classes: polynomial and log-polynomial.
 class Polynomial:
     """Standard or log-polynomial transport fit."""
 
@@ -14,6 +15,30 @@ class Polynomial:
                 f"poly_type must be 'polynomial' or 'log_polynomial', got '{poly_type}'"
             )
         self.poly_type = poly_type
+
+    @classmethod
+    def from_ct(cls, gas: ct.Solution, species: ct.Species, poly_type: str, n: int = 100):
+        """
+        Build from ct. TODO
+        """
+        Tmin = species.thermo.min_temp
+        Tmax = species.thermo.max_temp
+
+        reactants = species.name + ":1.0"
+
+        T = np.linspace(Tmin, Tmax, n)
+        mu = np.zeros(n)
+        kappa = np.zeros(n)
+
+        for i, Ti in enumerate(T):
+            gas.TPX = Ti, ct.one_atm, reactants
+            mu[i] = gas.viscosity
+            kappa[i] = gas.thermal_conductivity
+
+        if poly_type == "polynomial":
+            return cls.fit_polynomial(T, mu, kappa)
+        else:
+            return cls.fit_log_polynomial(T, mu, kappa)
 
     @classmethod
     def fit_polynomial(cls, T, mu, kappa, poly_order=3):
