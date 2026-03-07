@@ -1,23 +1,26 @@
-"""Equivalence test comparing old and new implementations on GRI-3.0 mechanism."""
+"""
+Equivalence test comparing old and new implementations on GRI-3.0 mechanism.
+
+Note that as the old implementation had the dcpdT continuity bug, we cannot
+compare the full pipeline but only function-wise comparison is done here.
+"""
+from ct2foam.v2 import Sutherland, Polynomial
 
 import unittest
 import numpy as np
+import cantera as ct
 
 from ct2foam.thermo_transport.ct_properties import ctThermoTransport
-from ct2foam.thermo_transport import ct2foam_utils as old_utils
-from ct2foam.v2.cantera_data import CanteraThermoTransport
+from ct2foam.thermo_transport import thermo_fitter as old_fitter
+from ct2foam.thermo_transport import transport_fitter as old_transport_fitter
 
-# Test parameters
+from ct2foam.v2.nasa7 import ThermoData, NASA7Polynomial
+
 MECHANISM = "gri30.yaml"
 TMID = 1000.0
 TLOW = 300.0
 THIGH = 3000.0
 T_EVAL = np.linspace(300, 3000, 128)
-
-# Tolerance for numerical equivalence
-ABS_TOL = 1e-30  # Absolute tolerance for coefficient comparison
-REL_TOL = 1e-15  # Relative tolerance for array comparison
-
 
 class TestV2OldEquivalence(unittest.TestCase):
     """Compare old and new implementations on GRI-3.0 mechanism species-by-species."""
@@ -27,376 +30,195 @@ class TestV2OldEquivalence(unittest.TestCase):
         """Load mechanism with both old and new implementations."""
         print(f"\nLoading {MECHANISM} with old implementation...")
         cls.old_data = ctThermoTransport(
-            MECHANISM, T=T_EVAL.copy(), Tmid=TMID, verbose=False
+            MECHANISM, T=T_EVAL.copy(), Tmid=TMID, verbose=True
         )
         cls.old_data.evaluate_properties()
 
-        print(f"Fitting thermo and transport with old implementation...")
-        cls.old_nasa_lo, cls.old_nasa_hi = old_utils.refit_ct_thermo(
-            cls.old_data, TMID, output_dir="/tmp"
-        )
-        cls.old_transport = old_utils.fit_ct_transport(cls.old_data, poly_order=3)
-        (
-            cls.old_As,
-            cls.old_Ts,
-            cls.old_std,
-            cls.old_poly_mu,
-            cls.old_poly_kappa,
-            cls.old_logpoly_mu,
-            cls.old_logpoly_kappa,
-        ) = cls.old_transport
+        cls.ct_gas = ct.Solution(MECHANISM)
 
-        print(f"Loading {MECHANISM} with new implementation...")
-        cls.new_mech = CanteraThermoTransport(MECHANISM)
-        cls.new_mech.fit_thermodynamics(
-            Tmid=TMID,
-            Tlow=TLOW,
-            Thigh=THIGH,
-            T_eval=T_EVAL.copy(),
-            verbose=False,
-        )
 
-        print(f"Old: {cls.old_data.gas.n_species} species")
-        print(f"New: {len(cls.new_mech.species_list)} species")
+    def test_source_data(self):
+        """
+        There is a small discrepancy how old and new properties are evaluated.
+        In particular, cp, h and s are more accurate in the new system as they
+        are based on direct NASA7 evaluation without gas mixture averaging.
+        """
+        atol = 1e-11
+        rtol = 1e-15
 
-    def _get_species_by_name(self, name):
-        """Get new implementation Species by name."""
-        for sp in self.new_mech.species_list:
-            if sp.name == name:
-                return sp
-        return None
+        for i, spi in enumerate(self.old_data.names):
+            _sp = self.ct_gas.species(self.ct_gas.species_index(spi))
+            new_data = ThermoData.from_ct(
+                _sp, self.old_data.T
+            )
+            np.testing.assert_allclose(self.old_data.cp[i,:], new_data.cp, atol=atol, rtol=rtol)
+            np.testing.assert_allclose(self.old_data.cp0_over_R[i], new_data.cp0/ct.gas_constant, atol=atol, rtol=rtol)
 
-    def test_species_count_match(self):
-        """Both implementations should have the same number of species."""
-        self.assertEqual(self.old_data.gas.n_species, len(self.new_mech.species_list))
+            np.testing.assert_allclose(self.old_data.h[i,:], new_data.h, atol=atol, rtol=rtol)
+            np.testing.assert_allclose(self.old_data.dhf_over_R[i], new_data.dhf/ct.gas_constant, atol=atol, rtol=rtol)
 
-    def test_species_names_match(self):
-        """Species names should match between implementations."""
-        old_names = set(self.old_data.names)
-        new_names = set([sp.name for sp in self.new_mech.species_list])
-        self.assertEqual(old_names, new_names)
+            np.testing.assert_allclose(self.old_data.s[i,:], new_data.s, atol=atol, rtol=rtol)
+            np.testing.assert_allclose(self.old_data.s0_over_R[i], new_data.s0/ct.gas_constant, atol=atol, rtol=rtol)
 
-    def test_all_species_fitted_successfully(self):
-        """All species should fit successfully in new implementation."""
-        failed_count = len(self.new_mech.failed_species)
-        self.assertEqual(
-            failed_count,
-            0,
-            f"New implementation failed on {failed_count} species: {list(self.new_mech.failed_species.keys())}",
-        )
 
-    def test_nasa7_coefficients_equivalence(self):
-        """NASA7 coefficients should match exactly between old and new for all species.
+    def test_nasa7_cp_fit(self):
+        """NASA7 coefficients should match reasonably between old and new for all species.
 
         Both implementations now reuse Cantera coefficients when they are continuous
         and have matching Tmid. Since GRI-3.0 has Tmid=1000.0 matching our choice,
-        both should reuse the same coefficients.
+        both should reuse the same coefficients. Small differences may occur due to
+        different fitting implementations.
         """
-        failures = []
+        # When everything is right, we should get exactly the same answer
+        nasa7_atol = 1e-30
+        nasa7_rtol = 1e-30
 
         for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
-            self.assertIsNotNone(
-                sp, f"Species {sp_name} not found in new implementation"
+
+            # CP only fit
+            Tci = np.where(self.old_data.T == TMID)[0][0]
+            old_c_lo, old_c_hi = old_fitter.fit_nasapolys_cp(
+                self.old_data.T,
+                Tci,
+                self.old_data.cp[i, :] / ct.gas_constant,
+                self.old_data.cp0_over_R[i],
+                self.old_data.dhf_over_R[i],
+                self.old_data.s0_over_R[i],
             )
-            self.assertIsNotNone(
-                sp.nasa7,
-                f"Species {sp_name} has no nasa7 fit in new implementation",
+
+            _sp = self.ct_gas.species(self.ct_gas.species_index(sp_name))
+            new_data = ThermoData.from_ct(
+                _sp, self.old_data.T
+            )
+            # We must ensure cp data is evaluated in exactly the same way
+            new_data.cp = self.old_data.cp[i,:]
+
+            nasa7 = NASA7Polynomial.fit_cp_only(new_data, TLOW, THIGH, TMID)
+
+            new_c_lo = nasa7.coeffs_low
+            new_c_hi = nasa7.coeffs_high
+
+            np.testing.assert_allclose(
+                old_c_lo, new_c_lo, atol=nasa7_atol, rtol=nasa7_rtol
+            )
+            np.testing.assert_allclose(
+                old_c_hi, new_c_hi, atol=nasa7_atol, rtol=nasa7_rtol
             )
 
-            # Compare coefficients directly (should be identical now)
-            old_c_lo = self.old_nasa_lo[i, :]
-            old_c_hi = self.old_nasa_hi[i, :]
-            new_c_lo = sp.nasa7.coeffs_low
-            new_c_hi = sp.nasa7.coeffs_high
 
-            # Check exact match with tight tolerances
-            c_lo_close = np.allclose(old_c_lo, new_c_lo, atol=ABS_TOL, rtol=REL_TOL)
-            c_hi_close = np.allclose(old_c_hi, new_c_hi, atol=ABS_TOL, rtol=REL_TOL)
+    def test_nasa7_full_fit(self):
+        """NASA7 coefficients should match reasonably between old and new for all species.
 
-            if not (c_lo_close and c_hi_close):
-                c_lo_err = np.max(np.abs(old_c_lo - new_c_lo))
-                c_hi_err = np.max(np.abs(old_c_hi - new_c_hi))
-                failures.append(
-                    f"{sp_name}: c_lo_err={c_lo_err:.2e}, c_hi_err={c_hi_err:.2e}"
-                )
+        Both implementations now reuse Cantera coefficients when they are continuous
+        and have matching Tmid. Since GRI-3.0 has Tmid=1000.0 matching our choice,
+        both should reuse the same coefficients. Small differences may occur due to
+        different fitting implementations.
+        """
+        nasa7_atol = 1e-30
+        nasa7_rtol = 1e-30
 
-        if failures:
-            self.fail(f"NASA7 coefficient mismatches:\n" + "\n".join(failures[:10]))
+        for i, sp_name in enumerate(self.old_data.names):
+
+            # CP only fit
+            Tci = np.where(self.old_data.T == TMID)[0][0]
+            old_c_lo, old_c_hi = old_fitter.fit_nasapolys_full(
+                self.old_data.T,
+                Tci,
+                self.old_data.cp[i, :] / ct.gas_constant,
+                self.old_data.h[i, :] / (ct.gas_constant*self.old_data.T),
+                self.old_data.s[i, :] / ct.gas_constant,
+                self.old_data.cp0_over_R[i],
+                self.old_data.dhf_over_R[i],
+                self.old_data.s0_over_R[i],
+            )
+
+            _sp = self.ct_gas.species(self.ct_gas.species_index(sp_name))
+            new_data = ThermoData.from_ct(
+                _sp, self.old_data.T
+            )
+            # We must ensure cp data is evaluated in exactly the same way
+            new_data.cp = self.old_data.cp[i,:]
+            new_data.h = self.old_data.h[i,:]
+            new_data.s = self.old_data.s[i,:]
+
+
+            nasa7 = NASA7Polynomial.fit_full(new_data, TLOW, THIGH, TMID)
+
+            new_c_lo = nasa7.coeffs_low
+            new_c_hi = nasa7.coeffs_high
+
+            np.testing.assert_allclose(
+                old_c_lo, new_c_lo, atol=nasa7_atol, rtol=nasa7_rtol
+            )
+            np.testing.assert_allclose(
+                old_c_hi, new_c_hi, atol=nasa7_atol, rtol=nasa7_rtol
+            )
+
 
     def test_sutherland_coefficients_equivalence(self):
-        """Sutherland As and Ts should match between old and new for all species."""
-        failures = []
+        """Sutherland As and Ts should match reasonably between old and new for all species.
 
-        for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
-            self.assertIsNotNone(
-                sp.sutherland, f"Species {sp_name} has no sutherland fit"
-            )
-
-            old_As = self.old_As[i]
-            old_Ts = self.old_Ts[i]
-            new_As = sp.sutherland.As
-            new_Ts = sp.sutherland.Ts
-
-            As_close = np.isclose(old_As, new_As, atol=ABS_TOL, rtol=REL_TOL)
-            Ts_close = np.isclose(old_Ts, new_Ts, atol=ABS_TOL, rtol=REL_TOL)
-
-            if not (As_close and Ts_close):
-                As_diff = abs(old_As - new_As)
-                Ts_diff = abs(old_Ts - new_Ts)
-                failures.append(
-                    f"{sp_name}: As_diff={As_diff:.2e}, Ts_diff={Ts_diff:.2e}"
-                )
-
-        if failures:
-            self.fail(
-                f"Sutherland coefficient mismatches:\n" + "\n".join(failures[:10])
-            )
-
-    def test_polynomial_transport_coefficients_equivalence(self):
-        """Polynomial transport coefficients should match between old and new."""
-        failures = []
-
-        for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
-            self.assertIsNotNone(
-                sp.polynomial, f"Species {sp_name} has no polynomial fit"
-            )
-
-            old_poly_mu = self.old_poly_mu[i, :]
-            old_poly_kappa = self.old_poly_kappa[i, :]
-            new_poly_mu = sp.polynomial.coeffs_mu
-            new_poly_kappa = sp.polynomial.coeffs_kappa
-
-            mu_close = np.allclose(old_poly_mu, new_poly_mu, atol=ABS_TOL, rtol=REL_TOL)
-            kappa_close = np.allclose(
-                old_poly_kappa, new_poly_kappa, atol=ABS_TOL, rtol=REL_TOL
-            )
-
-            if not (mu_close and kappa_close):
-                mu_diff = np.max(np.abs(old_poly_mu - new_poly_mu))
-                kappa_diff = np.max(np.abs(old_poly_kappa - new_poly_kappa))
-                failures.append(
-                    f"{sp_name}: mu_diff={mu_diff:.2e}, kappa_diff={kappa_diff:.2e}"
-                )
-
-        if failures:
-            self.fail(
-                f"Polynomial transport coefficient mismatches:\n"
-                + "\n".join(failures[:10])
-            )
-
-    def test_log_polynomial_transport_coefficients_equivalence(self):
-        """Log-polynomial transport coefficients should match between old and new."""
-        failures = []
-
-        for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
-            self.assertIsNotNone(
-                sp.log_polynomial, f"Species {sp_name} has no log_polynomial fit"
-            )
-
-            old_logpoly_mu = self.old_logpoly_mu[i, :]
-            old_logpoly_kappa = self.old_logpoly_kappa[i, :]
-            new_logpoly_mu = sp.log_polynomial.coeffs_mu
-            new_logpoly_kappa = sp.log_polynomial.coeffs_kappa
-
-            mu_close = np.allclose(
-                old_logpoly_mu, new_logpoly_mu, atol=ABS_TOL, rtol=REL_TOL
-            )
-            kappa_close = np.allclose(
-                old_logpoly_kappa, new_logpoly_kappa, atol=ABS_TOL, rtol=REL_TOL
-            )
-
-            if not (mu_close and kappa_close):
-                mu_diff = np.max(np.abs(old_logpoly_mu - new_logpoly_mu))
-                kappa_diff = np.max(np.abs(old_logpoly_kappa - new_logpoly_kappa))
-                failures.append(
-                    f"{sp_name}: mu_diff={mu_diff:.2e}, kappa_diff={kappa_diff:.2e}"
-                )
-
-        if failures:
-            self.fail(
-                f"Log-polynomial transport coefficient mismatches:\n"
-                + "\n".join(failures[:10])
-            )
-
-    def test_cp_evaluation_equivalence(self):
-        """Evaluate cp with both implementations and compare results.
-
-        Note: Since old implementation may reuse Cantera coefficients while new
-        always refits, we use 5% relative tolerance.
+        Small differences in Ts (temperature parameter) up to ~20K are acceptable due to
+        fitting implementation differences.
         """
-        failures = []
-        T_test = np.linspace(400, 2500, 50)
-
         for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
 
-            # Old implementation evaluation
-            from ct2foam.thermo_transport import thermo_fitter as th_fitter
+            _sp = self.ct_gas.species(self.ct_gas.species_index(sp_name))
+            n = 128
 
-            old_cp = th_fitter.cp_nasa7(
-                T_test, TMID, self.old_nasa_lo[i, :], self.old_nasa_hi[i, :]
-            )
+            reactants = _sp.name + ":1.0"
+            Tmin = _sp.thermo.min_temp
+            Tmax = _sp.thermo.max_temp
 
-            # New implementation evaluation
-            new_cp = sp.nasa7.cp_over_R(T_test)
+            T = np.linspace(Tmin, Tmax, n)
+            mu = np.zeros(n)
+            for i, Ti in enumerate(T):
+                self.ct_gas.TPX = Ti, ct.one_atm, reactants
+                mu[i] = self.ct_gas.viscosity
 
-            if not np.allclose(old_cp, new_cp, atol=1e-3, rtol=0.05):
-                max_diff = np.max(np.abs(old_cp - new_cp))
-                rel_err = np.max(np.abs(old_cp - new_cp) / np.abs(old_cp + 1e-10))
-                failures.append(
-                    f"{sp_name}: cp_max_diff={max_diff:.2e}, rel_err={rel_err:.2e}"
-                )
+            new_fit = Sutherland.from_ct(self.ct_gas, _sp, n=n)
 
-        if failures:
-            self.fail(
-                f"Cp evaluation mismatches (>5% rel error):\n"
-                + "\n".join(failures[:10])
-            )
+            old_As, old_Ts, _ = old_transport_fitter.fit_sutherland(T, mu)
 
-    def test_h_evaluation_equivalence(self):
-        """Evaluate h/(RT) with both implementations and compare results."""
-        failures = []
-        T_test = np.linspace(400, 2500, 50)
+            new_As = new_fit.As
+            new_Ts = new_fit.Ts
 
-        for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
-
-            # Old implementation evaluation
-            from ct2foam.thermo_transport import thermo_fitter as th_fitter
-
-            old_h = th_fitter.h_nasa7(
-                T_test, TMID, self.old_nasa_lo[i, :], self.old_nasa_hi[i, :]
-            )
-
-            # New implementation evaluation
-            new_h = sp.nasa7.h_over_RT(T_test)
-
-            if not np.allclose(old_h, new_h, atol=1e-3, rtol=0.10):
-                max_diff = np.max(np.abs(old_h - new_h))
-                rel_err = np.max(np.abs(old_h - new_h) / np.abs(old_h + 1e-10))
-                failures.append(
-                    f"{sp_name}: h_max_diff={max_diff:.2e}, rel_err={rel_err:.2e}"
-                )
-
-        if failures:
-            self.fail(
-                f"Enthalpy evaluation mismatches (>10% rel error):\n"
-                + "\n".join(failures[:10])
-            )
-
-    def test_s_evaluation_equivalence(self):
-        """Evaluate s/R with both implementations and compare results."""
-        failures = []
-        T_test = np.linspace(400, 2500, 50)
-
-        for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
-
-            # Old implementation evaluation
-            from ct2foam.thermo_transport import thermo_fitter as th_fitter
-
-            old_s = th_fitter.s_nasa7(
-                T_test, TMID, self.old_nasa_lo[i, :], self.old_nasa_hi[i, :]
-            )
-
-            # New implementation evaluation
-            new_s = sp.nasa7.s_over_R(T_test)
-
-            if not np.allclose(old_s, new_s, atol=1e-4, rtol=0.05):
-                max_diff = np.max(np.abs(old_s - new_s))
-                rel_err = np.max(np.abs(old_s - new_s) / np.abs(old_s + 1e-10))
-                failures.append(
-                    f"{sp_name}: s_max_diff={max_diff:.2e}, rel_err={rel_err:.2e}"
-                )
-
-        if failures:
-            self.fail(
-                f"Entropy evaluation mismatches (>5% rel error):\n"
-                + "\n".join(failures[:10])
-            )
-
-    def test_viscosity_evaluation_equivalence(self):
-        """Evaluate viscosity with Sutherland formula and compare."""
-        failures = []
-        T_test = np.array([500.0, 1000.0, 1500.0, 2000.0])
-
-        for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
-
-            # Old implementation evaluation
-            from ct2foam.thermo_transport import transport_fitter as tr_fitter
-
-            old_mu = tr_fitter.sutherland(T_test, self.old_As[i], self.old_Ts[i])
-
-            # New implementation evaluation
-            new_mu = sp.sutherland.mu(T_test)
-
-            if not np.allclose(old_mu, new_mu, atol=ABS_TOL, rtol=REL_TOL):
-                max_diff = np.max(np.abs(old_mu - new_mu))
-                failures.append(f"{sp_name}: mu_max_diff={max_diff:.2e}")
-
-        if failures:
-            self.fail(f"Viscosity evaluation mismatches:\n" + "\n".join(failures[:10]))
+            self.assertAlmostEqual(old_As, new_As)
+            self.assertAlmostEqual(old_Ts, new_Ts)
 
     def test_polynomial_mu_evaluation_equivalence(self):
-        """Evaluate polynomial viscosity and compare."""
-        failures = []
-        T_test = np.array([500.0, 1000.0, 1500.0, 2000.0])
 
         for i, sp_name in enumerate(self.old_data.names):
-            sp = self._get_species_by_name(sp_name)
 
-            # Old implementation evaluation
-            from ct2foam.thermo_transport import transport_fitter as tr_fitter
+            _sp = self.ct_gas.species(self.ct_gas.species_index(sp_name))
+            n = 128
 
-            old_mu, _ = tr_fitter.eval_polynomial(
-                self.old_poly_mu[i, :], self.old_poly_kappa[i, :], T_test
-            )
+            reactants = _sp.name + ":1.0"
+            Tmin = _sp.thermo.min_temp
+            Tmax = _sp.thermo.max_temp
 
-            # New implementation evaluation
-            new_mu = sp.polynomial.mu(T_test)
+            T = np.linspace(Tmin, Tmax, n)
+            mu = np.zeros(n)
+            kappa = np.zeros(n)
 
-            if not np.allclose(old_mu, new_mu, atol=ABS_TOL, rtol=REL_TOL):
-                max_diff = np.max(np.abs(old_mu - new_mu))
-                failures.append(f"{sp_name}: poly_mu_max_diff={max_diff:.2e}")
+            for i, Ti in enumerate(T):
+                self.ct_gas.TPX = Ti, ct.one_atm, reactants
+                mu[i] = self.ct_gas.viscosity
+                kappa[i] = self.ct_gas.thermal_conductivity
 
-        if failures:
-            self.fail(
-                f"Polynomial mu evaluation mismatches:\n" + "\n".join(failures[:10])
-            )
+            new_fit = Polynomial.from_ct(self.ct_gas, _sp, poly_type="polynomial", n=n)
+            old_c_mu, old_c_kappa = old_transport_fitter.fit_polynomial(T,mu,kappa)
+            new_c_mu = new_fit.coeffs_mu
+            new_c_kappa = new_fit.coeffs_kappa
+            np.testing.assert_allclose(old_c_mu, new_c_mu, atol=1e-30)
+            np.testing.assert_allclose(old_c_kappa, new_c_kappa, atol=1e-30)
 
-    def test_cantera_coefficients_reused_when_valid(self):
-        """Verify that valid Cantera coefficients are reused, not refitted.
-
-        We detect reuse by checking if the fitted Tmid matches exactly 1000.0,
-        which indicates Cantera coefficients were reused (since GRI-3.0 has Tmid=1000.0).
-        """
-        total_species = len(self.new_mech.species_list)
-        reused_count = 0
-
-        for sp in self.new_mech.species_list:
-            if sp.nasa7 is not None and abs(sp.nasa7.Tmid - 1000.0) < 1e-10:
-                reused_count += 1
-
-        reuse_percent = 100 * reused_count / total_species
-
-        # GRI-3.0 with Tmid=1000.0 should have very high reuse rate (>90%)
-        # because most species have continuous NASA7 coefficients at that Tmid
-        self.assertGreater(
-            reuse_percent,
-            90.0,
-            f"Expected >90% reuse rate for GRI-3.0, got {reuse_percent:.1f}% "
-            f"({reused_count}/{total_species})",
-        )
-
-        print(
-            f"\nReuse statistics: {reused_count}/{total_species} species "
-            f"({reuse_percent:.1f}%) reused Cantera coefficients"
-        )
+            new_fit_log = Polynomial.from_ct(self.ct_gas, _sp, poly_type="log_polynomial", n=n)
+            old_c_mu, old_c_kappa = old_transport_fitter.fit_log_polynomial(T,mu,kappa)
+            new_c_mu = new_fit_log.coeffs_mu
+            new_c_kappa = new_fit_log.coeffs_kappa
+            np.testing.assert_allclose(old_c_mu, new_c_mu, atol=1e-30)
+            np.testing.assert_allclose(old_c_kappa, new_c_kappa, atol=1e-30)
 
 
 if __name__ == "__main__":

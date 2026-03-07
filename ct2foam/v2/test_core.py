@@ -430,6 +430,64 @@ class TestSutherland(unittest.TestCase):
         mu_foam = 2.34407155073317e-05
         self.assertTrue(np.linalg.norm(mu - [mu_foam,mu_foam,mu_foam]) < 1e-12)
 
+class TestTransportFitting(unittest.TestCase):
+    """Test Sutherland transport fitting."""
+
+    def setUp(self):
+        """Set up viscosity data from H2."""
+        self.gas = ct.Solution("h2o2.yaml")
+        self.gas.transport_model = "multicomponent"
+
+        self.T = np.linspace(300, 3000, 128)
+        nT = len(self.T)
+        self.mu = np.zeros(nT)
+        self.kappa = np.zeros(nT)
+        self.cv = np.zeros(nT)
+
+        for i, T_i in enumerate(self.T):
+            self.gas.TPX = T_i, ct.one_atm, "H2:1.0"
+            self.mu[i] = self.gas.viscosity
+            self.kappa[i] = self.gas.thermal_conductivity
+            self.cv[i] = self.gas.cv_mole
+
+        self.W = self.gas.molecular_weights[self.gas.species_index("H2")]
+
+    def test_sutherland_fit(self):
+        """Test Sutherland.fit() method."""
+        sutherland = Sutherland.fit(self.T, self.mu)
+
+        mu_fit = sutherland.mu(self.T)
+        err = np.linalg.norm(self.mu - mu_fit) / np.linalg.norm(self.mu)
+        assert err < 0.02
+
+        kappa_fit = sutherland.kappa_euken(self.T, self.cv, self.W, ct.gas_constant)
+        err = np.linalg.norm(self.kappa - kappa_fit) / np.linalg.norm(self.kappa)
+        assert err < 0.02
+
+    def test_polynomial_fit(self):
+        poly = Polynomial.fit_polynomial(self.T, self.mu, self.kappa)
+
+        mu_fit=poly.mu(self.T)
+
+        err = np.linalg.norm(self.mu - mu_fit) / np.linalg.norm(self.mu)
+        assert err < 5e-3
+
+        kappa_fit = poly.kappa(self.T)
+        err = np.linalg.norm(self.kappa - kappa_fit) / np.linalg.norm(self.kappa)
+        assert err < 5e-3
+
+    def test_log_polynomial_fit(self):
+        poly = Polynomial.fit_log_polynomial(self.T, self.mu, self.kappa)
+
+        mu_fit=poly.mu(self.T)
+
+        err = np.linalg.norm(self.mu - mu_fit) / np.linalg.norm(self.mu)
+        assert err < 1e-4
+
+        kappa_fit = poly.kappa(self.T)
+        err = np.linalg.norm(self.kappa - kappa_fit) / np.linalg.norm(self.kappa)
+        assert err < 5e-3
+
 
 class TestPolynomial(unittest.TestCase):
      """Test Polynomial transport class."""
@@ -507,259 +565,6 @@ class TestPolynomial(unittest.TestCase):
          self.assertTrue(np.abs(kappa - kappa_foam) / np.abs(kappa_foam) < 1e-12)
 
 
-
-# class TestSpeciesOutput(unittest.TestCase):
-#     """Test Species export to OpenFOAM format.
-#
-#     Updated from TestSpeciesDatasetOutput to use new API.
-#     """
-#
-#     def setUp(self):
-#         """Create a minimal Species with fitted coefficients."""
-#         self.species = Species(
-#             name="TEST",
-#             W=18.0,
-#             cp0_over_R=4.0,
-#             dhf_over_R=-13000.0,
-#             s0_over_R=45.0,
-#             elements={"H": 2, "O": 1},
-#         )
-#
-#         # Add fitted coefficients
-#         self.species.nasa7 = NASA7Polynomial(H2O_C_LO, H2O_C_HI, H2O_TMID)
-#         self.species.sutherland = Sutherland(As=1.67e-6, Ts=170.0)
-#         self.species.polynomial = Polynomial(
-#             np.array([1e-12, -2e-9, 1e-6, 5e-5]),
-#             np.array([2e-12, -3e-9, 2e-6, 6e-5]),
-#             poly_type="polynomial",
-#         )
-#         self.species.log_polynomial = Polynomial(
-#             np.array([0.1, 0.2, 0.3, 0.4]),
-#             np.array([0.15, 0.25, 0.35, 0.45]),
-#             poly_type="log_polynomial",
-#         )
-#
-#     def test_to_foam_dict_requires_tlow_thigh(self):
-#         """to_foam_dict now requires Tlow and Thigh as parameters."""
-#         foam_dict = self.species.to_foam_dict(Tlow=300, Thigh=3000)
-#         self.assertIsNotNone(foam_dict)
-#
-#     def test_to_foam_dict_contains_required_keys(self):
-#         """Exported dict should contain all required keys."""
-#         foam_dict = self.species.to_foam_dict(Tlow=300, Thigh=3000)
-#
-#         required_keys = [
-#             "name",
-#             "W",
-#             "Tmid",
-#             "Tlow",
-#             "Thigh",
-#             "nasa7_lo",
-#             "nasa7_hi",
-#             "As",
-#             "Ts",
-#             "poly_mu",
-#             "poly_kappa",
-#             "logpoly_mu",
-#             "logpoly_kappa",
-#         ]
-#
-#         for key in required_keys:
-#             self.assertIn(key, foam_dict)
-#
-#     def test_to_foam_dict_tmid_from_nasa7(self):
-#         """Tmid should come from nasa7.Tmid, not Species attribute."""
-#         foam_dict = self.species.to_foam_dict(Tlow=300, Thigh=3000)
-#         self.assertEqual(foam_dict["Tmid"], self.species.nasa7.Tmid)
-#         self.assertEqual(foam_dict["Tmid"], H2O_TMID)
-#
-#     def test_to_foam_dict_tlow_thigh_from_parameters(self):
-#         """Tlow and Thigh should come from method parameters."""
-#         foam_dict = self.species.to_foam_dict(Tlow=250, Thigh=3500)
-#         self.assertEqual(foam_dict["Tlow"], 250)
-#         self.assertEqual(foam_dict["Thigh"], 3500)
-#
-#     def test_to_foam_dict_nasa7_coefficients(self):
-#         """NASA7 coefficients should be exported as lists."""
-#         foam_dict = self.species.to_foam_dict(Tlow=300, Thigh=3000)
-#         self.assertIsInstance(foam_dict["nasa7_lo"], list)
-#         self.assertIsInstance(foam_dict["nasa7_hi"], list)
-#         self.assertEqual(len(foam_dict["nasa7_lo"]), 7)
-#         self.assertEqual(len(foam_dict["nasa7_hi"]), 7)
-#
-#     def test_to_foam_dict_without_nasa7_raises(self):
-#         """to_foam_dict should raise error if nasa7 not set."""
-#         species_no_fit = Species(
-#             name="NOFITYET",
-#             W=28.0,
-#             cp0_over_R=3.5,
-#             dhf_over_R=0.0,
-#             s0_over_R=20.0,
-#         )
-#         with self.assertRaises(RuntimeError):
-#             species_no_fit.to_foam_dict(Tlow=300, Thigh=3000)
-#
-
-# class TestCanteraThermoTransportWorkflow(unittest.TestCase):
-#     """Test CanteraThermoTransport end-to-end workflow."""
-#
-#     @classmethod
-#     def setUpClass(cls):
-#         """Set up test mechanism file."""
-#         test_data_dir = Path(__file__).parent.parent / "test_data"
-#         cls.mech_file = test_data_dir / "h2o2_mod.yaml"
-#
-#     def test_from_cantera_creates_dataset(self):
-#         """Constructor and fit_thermodynamics successfully creates a CanteraThermoTransport."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
-#         self.assertIsNotNone(dataset)
-#         self.assertIsInstance(dataset, CanteraThermoTransport)
-#
-#     def test_from_cantera_loads_all_species(self):
-#         """Constructor and fit_thermodynamics loads all species from mechanism."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
-#         self.assertEqual(len(dataset.species_list), 10)  # h2o2_mod has 10 species
-#
-#     def test_from_cantera_all_species_fitted(self):
-#         """All species should have fitted coefficients."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
-#         for sp in dataset.species_list:
-#             self.assertIsNotNone(sp.nasa7, f"{sp.name} missing nasa7")
-#             self.assertIsNotNone(sp.sutherland, f"{sp.name} missing sutherland")
-#             self.assertIsNotNone(sp.polynomial, f"{sp.name} missing polynomial")
-#             self.assertIsNotNone(sp.log_polynomial, f"{sp.name} missing log_polynomial")
-#
-#     def test_from_cantera_quality_checks_performed(self):
-#         """All species should have quality metrics."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
-#         for sp in dataset.species_list:
-#             self.assertIsNotNone(sp.quality, f"{sp.name} missing quality check")
-#
-#     def test_from_cantera_custom_tmid(self):
-#         """fit_thermodynamics respects custom Tmid."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1200.0, verbose=False)
-#         self.assertEqual(dataset.Tmid, 1200.0)
-#
-#     def test_from_cantera_custom_temperature_range(self):
-#         """fit_thermodynamics respects custom Tlow/Thigh."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, Tlow=400.0, Thigh=2500.0, verbose=False)
-#         self.assertEqual(dataset.Tlow, 400.0)
-#         self.assertEqual(dataset.Thigh, 2500.0)
-#
-#     def test_write_output_creates_files(self):
-#         """write_output creates required OpenFOAM files."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
-#
-#         with tempfile.TemporaryDirectory() as tmpdir:
-#             output_dir = Path(tmpdir) / "foam_output"
-#             dataset.write_output(output_dir)
-#
-#             self.assertTrue((output_dir / "thermo.foam").exists())
-#             self.assertTrue((output_dir / "reactions.foam").exists())
-#             self.assertTrue((output_dir / "species.foam").exists())
-#
-#     def test_write_output_thermo_file_content(self):
-#         """thermo.foam should contain species data."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
-#
-#         with tempfile.TemporaryDirectory() as tmpdir:
-#             output_dir = Path(tmpdir) / "foam_output"
-#             dataset.write_output(output_dir)
-#
-#             thermo_content = (output_dir / "thermo.foam").read_text()
-#             self.assertGreater(len(thermo_content), 100)
-#             self.assertIn("H2", thermo_content)
-#             self.assertIn("O2", thermo_content)
-#
-#     def test_write_output_species_file_content(self):
-#         """species.foam should list all species."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
-#
-#         with tempfile.TemporaryDirectory() as tmpdir:
-#             output_dir = Path(tmpdir) / "foam_output"
-#             dataset.write_output(output_dir)
-#
-#             species_content = (output_dir / "species.foam").read_text()
-#             for sp in dataset.species_list:
-#                 self.assertIn(sp.name, species_content)
-#
-#
-# class TestCanteraThermoTransportErrorHandling(unittest.TestCase):
-#     """Test error handling in CanteraThermoTransport."""
-#
-#     def test_from_cantera_invalid_file_raises(self):
-#         """Constructor should raise error for invalid mechanism file."""
-#         with self.assertRaises(Exception):
-#             dataset = CanteraThermoTransport("nonexistent_mechanism.yaml")
-#             dataset.fit_thermodynamics(Tmid=1000.0)
-#
-#     def test_from_cantera_negative_tmid_raises(self):
-#         """fit_thermodynamics should validate Tmid is positive."""
-#         test_data_dir = Path(__file__).parent.parent / "test_data"
-#         mech_file = test_data_dir / "h2o2_mod.yaml"
-#
-#         # Negative Tmid might cause issues, but might not be explicitly validated
-#         # This test checks current behavior
-#         try:
-#             dataset = CanteraThermoTransport(mech_file)
-#             dataset.fit_thermodynamics(Tmid=-1000.0, verbose=False)
-#             # If it doesn't raise, that's current behavior
-#             self.assertIsNotNone(dataset)
-#         except (ValueError, AssertionError):
-#             # If it does raise, that's also acceptable
-#             pass
-#
-
-# class TestNASA7ReuseLogic(unittest.TestCase):
-#     """Test Cantera NASA7 coefficient reuse logic."""
-#
-#     @classmethod
-#     def setUpClass(cls):
-#         """Set up test mechanism."""
-#         test_data_dir = Path(__file__).parent.parent / "test_data"
-#         cls.mech_file = test_data_dir / "h2o2_mod.yaml"
-#
-#     def test_cantera_coefficients_reused_by_default(self):
-#         """Valid Cantera coefficients should be reused by default."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, verbose=False)
-#
-#         # Most species should successfully fit (either reused or refitted)
-#         fitted_count = sum(1 for sp in dataset.species_list if sp.nasa7 is not None)
-#         self.assertEqual(fitted_count, len(dataset.species_list))
-#
-#     def test_force_refit_refits_all(self):
-#         """force_refit=True should refit all species."""
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(Tmid=1000.0, force_refit=True, verbose=False)
-#
-#         # All species should still be fitted
-#         fitted_count = sum(1 for sp in dataset.species_list if sp.nasa7 is not None)
-#         self.assertEqual(fitted_count, len(dataset.species_list))
-#
-#     def test_custom_tolerances_affect_reuse(self):
-#         """Custom tolerances should affect reuse decisions."""
-#         strict_tolerances = FittingTolerances.strict()
-#
-#         dataset = CanteraThermoTransport(self.mech_file)
-#         dataset.fit_thermodynamics(
-#             Tmid=1000.0, tolerances=strict_tolerances, verbose=False
-#         )
-#
-#         # With strict tolerances, some might need refitting
-#         # But all should still succeed
-#         fitted_count = sum(1 for sp in dataset.species_list if sp.nasa7 is not None)
-#         self.assertEqual(fitted_count, len(dataset.species_list))
-#
 
 if __name__ == "__main__":
     unittest.main()

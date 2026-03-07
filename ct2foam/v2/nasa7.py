@@ -38,6 +38,10 @@ class ThermoData:
     ):
         """
         Evaluate data for fitting based on Cantera species.
+        It is worth noting that infering data via species.thermo.cp() yields
+        different floating point value than gas.cp_mole in given mixture temperature.
+        Discrepancy is O(1e-9) but enough to influence unit tests compared to old version.
+        One needs to be careful when comparin 1-1 results between old and new.
         """
         cp0 = species.thermo.cp(_Tstd)
         dhf = species.thermo.h(_Tstd)

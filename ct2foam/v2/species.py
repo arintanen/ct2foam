@@ -1,15 +1,18 @@
 """Species class - lightweight container for species metadata and fitted coefficients."""
+
 from typing import List
 from pathlib import Path
 
 import numpy as np
 
 import cantera as ct
+
 # TODO: fix paths eventually
 from .nasa7 import NASA7Polynomial
 from .sutherland import Sutherland
 from .polynomial import Polynomial
 import ct2foam.v2.foam_writer as writer
+
 
 class Species:
     """
@@ -61,6 +64,7 @@ class Species:
         Tmin: float = 200,
         Tmax: float = 3000,
         Tmid: float = 1000,
+        n: int = 128
     ):
         """
         Construct based on cantera Species object.
@@ -68,11 +72,11 @@ class Species:
         species = gas.species(gas.species_index(species_name))
         W = species.molecular_weight
         elements = species.composition
-        nasa7 = NASA7Polynomial.from_ct(species, Tmin, Tmax, Tmid, n=128)
-        sutherland = Sutherland.from_ct(gas, species, n=100)
-        polynomial = Polynomial.from_ct(gas, species, poly_type="polynomial", n=100)
+        nasa7 = NASA7Polynomial.from_ct(species, Tmin, Tmax, Tmid, n)
+        sutherland = Sutherland.from_ct(gas, species, n)
+        polynomial = Polynomial.from_ct(gas, species, poly_type="polynomial", n=n)
         log_polynomial = Polynomial.from_ct(
-            gas, species, poly_type="log_polynomial", n=100
+            gas, species, poly_type="log_polynomial", n=n
         )
 
         return cls(
@@ -145,6 +149,7 @@ class SpeciesList:
 
     Here, we can extend to e.g. experimental data by adding new constructors.
     """
+
     def __init__(self, species: List[Species] = []):
         self.species = species
 
@@ -218,7 +223,7 @@ class SpeciesList:
                 logpoly_kappa,
                 sp.nasa7.Tmid,
                 sp.nasa7.Tlow,
-                sp.nasa7.Thigh,
+                sp.nasa7.Tmax,
                 sp.nasa7.coeffs_low,
                 sp.nasa7.coeffs_high,
                 elements=sp.elements,
