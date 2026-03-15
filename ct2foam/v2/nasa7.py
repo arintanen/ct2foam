@@ -86,7 +86,7 @@ class NASA7Polynomial:
         full_refit_required = False
         cp_refit_required = False
 
-        print(f"Trying to use existing thermo fits for {species.name}:")
+        print(f"\n{species.name} NASA7 polynomial:")
 
         thermo_type = type(species.thermo).__name__
         coeffs = species.thermo.coeffs
@@ -96,12 +96,10 @@ class NASA7Polynomial:
             print("- Warning: thermo type is not NASA7-Polynomial.")
 
         if species.thermo.min_temp > Tmin:
-            full_refit_required = True
-            print(f"- Warning: Tmin above limit ({species.thermo.min_temp} > {Tmin})")
+            print(f"- Warning: Tmin below limit ({species.thermo.min_temp} > {Tmin})")
 
         if species.thermo.max_temp < Tmax:
-            full_refit_required = True
-            print(f"- Warning: Tmax below limit ({species.thermo.max_temp} < {Tmin})")
+            print(f"- Warning: Tmax above limit ({species.thermo.max_temp} < {Tmin})")
 
         if np.abs(Tmid - coeffs[0]) / Tmid > tol_c0:
             cp_refit_required = True
@@ -550,7 +548,7 @@ class NASA7Polynomial:
         val_low = func(self.coeffs_low, self.Tmid)
         val_high = func(self.coeffs_high, self.Tmid)
 
-        return np.abs(val_low - val_high) / np.abs(val_low)
+        return np.abs(val_low - val_high) / np.abs(max(val_low, 1e-6))
 
     def continuity_error(self) -> dict:
         # C0 / C1 continuity
