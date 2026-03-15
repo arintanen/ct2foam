@@ -1,6 +1,6 @@
 """NASA7 polynomial coefficient class for thermodynamic properties."""
 
-from typing import Callable, List
+from typing import Callable
 from numpy import typing as npt
 from dataclasses import dataclass
 
@@ -8,7 +8,7 @@ import cantera as ct
 import numpy as np
 from ct2foam.thermo_transport import lsqlin
 
-_Tstd = 298.15  # TODO: is this used elsewhere - replace by imported value?
+_Tstd = 298.15
 
 @dataclass
 class ThermoData:
@@ -33,8 +33,7 @@ class ThermoData:
     def from_ct(
         cls,
         species: ct.Species,
-        temperature: npt.NDArray[np.floating],
-        gas_constant: float = ct.gas_constant,
+        temperature: npt.NDArray[np.floating]
     ):
         """
         Evaluate data for fitting based on Cantera species.
@@ -56,7 +55,7 @@ class ThermoData:
             h[i] = species.thermo.h(Ti)
             s[i] = species.thermo.s(Ti)
 
-        return cls(gas_constant, temperature, cp, h, s, cp0, dhf, s0)
+        return cls(ct.gas_constant, temperature, cp, h, s, cp0, dhf, s0)
 
 
 class NASA7Polynomial:
@@ -71,7 +70,14 @@ class NASA7Polynomial:
 
     @classmethod
     def from_ct(
-        cls, species: ct.Species, Tmin: float, Tmax: float, Tmid: float, n: int=128
+        cls,
+        species: ct.Species,
+        Tmin: float,
+        Tmax: float,
+        Tmid: float,
+        n: int=128,
+        tol: float=1e-2,
+        tol_c0: float=1e-6
     ):
         """
         Construct from Cantera Species object
@@ -97,8 +103,7 @@ class NASA7Polynomial:
             full_refit_required = True
             print(f"- Warning: Tmax below limit ({species.thermo.max_temp} < {Tmin})")
 
-        # TODO: how user could set tolerances?
-        if np.abs(Tmid - coeffs[0]) / Tmid > 1e-6:
+        if np.abs(Tmid - coeffs[0]) / Tmid > tol_c0:
             cp_refit_required = True
             print(f"- Warning: different common temperature: {coeffs[0]} != {Tmid}")
 
@@ -106,7 +111,6 @@ class NASA7Polynomial:
         c_lo = np.array(coeffs[8:15])
         nasa7 = cls(c_lo, c_hi, Tmid, Tmin, Tmax)
 
-        tol_c0 = 1e-6
         continuous = nasa7.is_c0_continuous(tol=tol_c0)
         if not continuous:
             print("- Warning: Existing polynomial not continuous:")
@@ -125,15 +129,14 @@ class NASA7Polynomial:
         _Tl = np.linspace(Tmin, Tmid, _n, endpoint=False)
         _Th = np.linspace(Tmid, Tmax, _n)
         T = np.concatenate((_Tl, _Th))
-        R = ct.gas_constant # TODO: this should be OF one?
-        thermo_data = ThermoData.from_ct(species, T, R)
+        thermo_data = ThermoData.from_ct(species, T)
 
         # Refit cp only
         if not full_refit_required:
             print("- Re-fitting Cp only.")
             nasa7 = cls.fit_cp_only(thermo_data, Tmin, Tmax, Tmid)
             # Raise if not within tolerances
-            _ = nasa7.fit_quality(thermo_data, error=True, tol=1e-2, tol_c0=1e-6)
+            _ = nasa7.fit_quality(thermo_data, error=True, tol=tol, tol_c0=tol_c0)
             return nasa7
 
         # Otherwise carry out full system fit
@@ -141,7 +144,7 @@ class NASA7Polynomial:
         nasa7 = cls.fit_full(thermo_data, Tmin, Tmax, Tmid)
 
         # Raise if not within tolerances
-        _ = nasa7.fit_quality(thermo_data, error=True, tol=1e-2, tol_c0=1e-6)
+        _ = nasa7.fit_quality(thermo_data, error=True, tol=tol, tol_c0=tol_c0)
         return nasa7
 
     # -- private single-range evaluators --

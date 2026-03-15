@@ -69,8 +69,7 @@ class Sutherland:
         """
         return self.sutherland_func(T, self.As, self.Ts)
 
-    # TODO: change naming eventually globally to kappa and mentione Euken in docstring
-    def kappa_euken(self, T: Union[float, np.ndarray], cv_mole, W, R):
+    def kappa(self, T: Union[float, np.ndarray], cv_mole, W, R):
         """
         Evaluate Euken thermal conductivity based on OpenFOAM formulation:
         mu * Cv * (1.32 + 1.77*R_specific/Cv).

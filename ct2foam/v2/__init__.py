@@ -4,13 +4,11 @@ from .nasa7 import NASA7Polynomial
 from .sutherland import Sutherland
 from .polynomial import Polynomial
 from .species import Species, SpeciesList
-from .fitting_tolerances import FittingTolerances
 
 __all__ = [
     "NASA7Polynomial",
     "Sutherland",
     "Polynomial",
     "Species",
-    "SpeciesList",
-    "FittingTolerances",
+    "SpeciesList"
 ]
