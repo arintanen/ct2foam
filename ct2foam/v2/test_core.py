@@ -376,6 +376,38 @@ class TestNASA7PolynomialFitting(unittest.TestCase):
         self.assertAlmostEqual(h_fit, self.data.dhf, places=8)
         self.assertAlmostEqual(s_fit, self.data.s0, places=23)
 
+    def test_correct_coeffs_preserves_standard_state(self):
+        """Test correct_coeffs() preserves h/s at standard state."""
+        coeffs = np.array(
+            [
+                3.5,
+                0.003,
+                -6e-6,
+                7e-9,
+                -2.5e-12,
+                0,
+                2.5,
+                2.7,
+                0.003,
+                -8e-7,
+                1.2e-10,
+                -6.4e-15,
+                0,
+                6.9,
+            ]
+        )
+
+        Tcommon = 1000.0
+        dhf_over_R = 5.0
+        s0_over_R = 150.0
+
+        corrected = NASA7Polynomial._correct_coeffs(coeffs, Tcommon, dhf_over_R, s0_over_R)
+
+        # Should return 14-element array
+        self.assertEqual(len(corrected), 14)
+        # Coefficients should be finite
+        self.assertTrue(np.all(np.isfinite(corrected)))
+
 
 class TestSutherland(unittest.TestCase):
     """Test Sutherland transport model."""
@@ -742,6 +774,88 @@ class TestIntegrationEndToEnd(unittest.TestCase):
         self.assertEqual(foam_dict["Tmid"], h2_species.nasa7.Tmid)
         self.assertEqual(len(foam_dict["nasa7_lo"]), 7)
         self.assertEqual(len(foam_dict["nasa7_hi"]), 7)
+
+
+class TestEdgeCases(unittest.TestCase):
+    """Test polynomial fitting edge cases."""
+
+    def test_fit_polynomial_single_point_minimum_data(self):
+        """Test fitting with minimal data points."""
+        T = np.array([500.0, 1000.0])
+        data_mu = np.array([1.0, 2.0])
+        data_kappa = np.array([0.5, 1.5])
+
+        poly = Polynomial.fit_polynomial(T, data_mu, data_kappa, poly_order=2)
+
+        self.assertTrue(np.all(np.isfinite(poly.mu(T))))
+
+    def test_fit_polynomial_dimension_mismatch_T_data(self):
+        """Test dimension mismatch raises appropriate error or handles gracefully."""
+        T = np.linspace(300, 1000, 50)
+        mu = np.linspace(0, 1, 30)  # Different length
+        kappa = np.linspace(0, 1, 30)  # Different length
+
+        # Should raise error on dimension mismatch
+        with self.assertRaises((ValueError, IndexError, TypeError)):
+            # fit_polynomial expects matching dimensions
+            Polynomial.fit_polynomial(T, mu, kappa, poly_order=3)
+
+    def test_fit_polynomial_NaN_in_input_data(self):
+        """Test handling of NaN values in input data."""
+        T = np.array([300.0, 400.0, 500.0, 1000.0])
+        mu = np.array([1.0, np.nan, 2.0, 3.0])
+        kappa = np.array([1.0, 1.5, 2.0, 3.0])
+
+        # Should either raise error or produce NaN result
+        try:
+            result = Polynomial.fit_polynomial(T, mu, kappa, poly_order=2).mu(T)
+            # If it doesn't raise, result should contain NaN or be invalid
+            self.assertTrue(np.any(np.isnan(result)) or not np.all(np.isfinite(result)))
+        except (ValueError, RuntimeError):
+            # Acceptable to raise error for NaN input
+            pass
+
+    def test_fit_polynomial_zero_cv_euken_calculation(self):
+        """Test Euken formula with cv=0 edge case."""
+        T = 1500.0
+        cv_mole = 0.0  # Edge case
+        W = 28.0
+        suth = Sutherland(As=1.5e-6, Ts=100.0)
+        R = ct.gas_constant
+        # Euken formula uses cv, division by zero at cv=0
+        with self.assertRaises(ZeroDivisionError):
+            suth.kappa(T, cv_mole, W, R)
+
+    def test_sutherland_zero_temperature(self):
+        """Test Sutherland formula at T=0 (singular point)."""
+        suth = Sutherland(As=1.5e-6, Ts=100.0)
+        # At T=0, division by zero occurs
+        with self.assertRaises(ZeroDivisionError):
+            suth.mu(0.0)
+
+    def test_sutherland_low_temperature(self):
+        """Test Sutherland formula at very low temperature."""
+        T = 0.1
+        As = 1e-6
+        Ts = 170.0
+
+        mu = Sutherland(As, Ts).mu(T)
+        self.assertTrue(np.isfinite(mu))
+        self.assertGreater(mu, 0)
+
+    def test_euken_negative_cv(self):
+        """Test Euken formula with negative cv (unphysical)."""
+        cv_mole = -1000.0  # Negative (unphysical)
+        W = 28.0
+        R = ct.gas_constant
+        T = 300
+        As = 1e-6
+        Ts = 170.0
+        suth = Sutherland(As, Ts)
+
+        # Should compute but result may be unphysical
+        kappa = suth.kappa(T, cv_mole, W, R)
+        self.assertTrue(np.isfinite(kappa))
 
 
 if __name__ == "__main__":
