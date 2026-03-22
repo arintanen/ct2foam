@@ -1,11 +1,12 @@
 """NASA7 polynomial coefficient class for thermodynamic properties."""
 
-from typing import Callable
+from typing import Callable, Self
 from numpy import typing as npt
 from dataclasses import dataclass
 
 import cantera as ct
 import numpy as np
+
 from ct2foam.thermo_transport import lsqlin
 
 _Tstd = 298.15
@@ -34,7 +35,7 @@ class ThermoData:
         cls,
         species: ct.Species,
         temperature: npt.NDArray[np.floating]
-    ):
+    ) -> Self:
         """
         Evaluate data for fitting based on Cantera species.
         It is worth noting that infering data via species.thermo.cp() yields
@@ -67,6 +68,11 @@ class NASA7Polynomial:
         self.Tmid = Tmid
         self.Tlow = Tmin
         self.Tmax = Tmax
+        # Fit quality
+        self.quality = {
+            "c0_continuity": {"cp": 0.0, "dcpdT": 0.0, "h": 0.0, "s": 0.0},
+            "consistency": {"cp": 0.0, "h": 0.0, "s": 0.0},
+        }
 
     @classmethod
     def from_ct(
@@ -76,9 +82,8 @@ class NASA7Polynomial:
         Tmax: float,
         Tmid: float,
         n: int=128,
-        tol: float=1e-2,
         tol_c0: float=1e-6
-    ):
+    ) -> Self:
         """
         Construct from Cantera Species object
         """
@@ -133,16 +138,13 @@ class NASA7Polynomial:
         if not full_refit_required:
             print("- Re-fitting Cp only.")
             nasa7 = cls.fit_cp_only(thermo_data, Tmin, Tmax, Tmid)
-            # Raise if not within tolerances
-            _ = nasa7.fit_quality(thermo_data, error=True, tol=tol, tol_c0=tol_c0)
+            nasa7.fit_quality(thermo_data)
             return nasa7
 
         # Otherwise carry out full system fit
         print("- Re-fitting full system.")
         nasa7 = cls.fit_full(thermo_data, Tmin, Tmax, Tmid)
-
-        # Raise if not within tolerances
-        _ = nasa7.fit_quality(thermo_data, error=True, tol=tol, tol_c0=tol_c0)
+        nasa7.fit_quality(thermo_data)
         return nasa7
 
     # -- private single-range evaluators --
@@ -508,13 +510,11 @@ class NASA7Polynomial:
 
         return coeffs
 
-    def fit_quality(self, data: ThermoData, error=False, tol=1e-6, tol_c0=1e-6):
+    def fit_quality(self, data: ThermoData):
         """Check L2 error of coefficients against reference data."""
 
         # C0 / C1 continuity
         c0 = self.continuity_error()
-
-        max_c0 = max(c0["cp"], c0["dcpdT"], c0["h"], c0["s"])
 
         # Consistency with reference data
         R = data.gas_constant
@@ -526,20 +526,13 @@ class NASA7Polynomial:
         ds = np.abs(data.s/R - self.s_over_R(T))
         err_s = np.linalg.norm(ds) / np.linalg.norm(data.s/R)
 
-        max_err = max(err_cp, err_h, err_s)
-
         quality = {
             "c0_continuity": c0,
-            "consistency": {"cp_error": err_cp, "h_error": err_h, "s_error": err_s},
+            "consistency": {"cp": err_cp, "h": err_h, "s": err_s},
         }
-
-        if error and (max_c0 > tol_c0 or max_err > tol):
-            raise ValueError(
-                f"NASA7 polynomial quality failed with tol={tol}."
-                f"Overall fit quality is as follows:\n{quality}"
-            )
-
+        self.quality = quality
         return quality
+
 
     def c0_continuity(self, func: Callable):
         """
@@ -547,8 +540,7 @@ class NASA7Polynomial:
         """
         val_low = func(self.coeffs_low, self.Tmid)
         val_high = func(self.coeffs_high, self.Tmid)
-
-        return np.abs(val_low - val_high) / np.abs(max(val_low, 1e-6))
+        return np.abs(val_low - val_high) / max(np.abs(val_low), 1e-12)
 
     def continuity_error(self) -> dict:
         # C0 / C1 continuity

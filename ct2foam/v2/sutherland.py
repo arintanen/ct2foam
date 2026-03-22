@@ -1,6 +1,5 @@
 """Sutherland viscosity model with Euken thermal conductivity."""
-from typing import Union
-
+from typing import Union, Self
 import numpy as np
 from scipy.optimize import curve_fit
 import cantera as ct
@@ -14,9 +13,8 @@ class Sutherland:
         self.std_err = std_err if std_err is None else np.asarray(std_err, dtype=float)
 
     @classmethod
-    def from_ct(cls, gas: ct.Solution, species: ct.Species, n: int = 128):
+    def from_ct(cls, gas: ct.Solution, species: ct.Species, n: int = 128) -> Self:
         """
-        Build from ct. TODO
         Mention here that we made a decision to respect cantera Tmin/Tmax limits for now.
         """
         Tmin = species.thermo.min_temp

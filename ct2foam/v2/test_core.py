@@ -213,9 +213,9 @@ class TestNASA7PolynomialCanteraConsistency(unittest.TestCase):
         data = ThermoData.from_ct(h2, self.T)
         nasa7 = NASA7Polynomial.from_ct(h2, 200, 3500, 1000)
         result = nasa7.fit_quality(data)["consistency"]
-        self.assertIn("cp_error", result)
-        self.assertIn("h_error", result)
-        self.assertIn("s_error", result)
+        self.assertIn("cp", result)
+        self.assertIn("h", result)
+        self.assertIn("s", result)
 
     def test_poly_representation(self):
         """Check if H2 species is correctly presented"""
@@ -340,11 +340,13 @@ class TestNASA7PolynomialFitting(unittest.TestCase):
     def test_fit_quality(self):
         h2 = self.gas.species(self.gas.species_index("H2"))
         nasa7 = NASA7Polynomial.from_ct(h2, 200, 3500, 1000)
-        _ = nasa7.fit_quality(self.data)
+        nasa7.fit_quality(self.data)
+        assert nasa7.quality["c0_continuity"]["cp"] < 1e-12
+
         # Perturb the coefficients to make this quality dict go off
         nasa7.coeffs_low *= 1.121212
-        with self.assertRaises(ValueError):
-            nasa7.fit_quality(self.data, error=True)
+        nasa7.fit_quality(self.data)
+        assert nasa7.quality["c0_continuity"]["cp"] > 0.05
 
     def test_correct_coeffs_integration_constants(self):
         """Test that _correct_coeffs properly sets integration constants."""
@@ -612,7 +614,7 @@ class TestSpeciesList(unittest.TestCase):
     def test_from_ct_mech_loads_mechanism(self):
         """Test that from_ct_mech successfully loads and fits a mechanism."""
         species_list = SpeciesList.from_ct_mech(
-            str(self.mech_file), Tmin=300, Tmax=3000, Tmid=1000
+            str(self.mech_file), Tmin=300, Tmax=3000, Tmid=1000, plot=False
         )
 
         self.assertIsNotNone(species_list)
@@ -625,7 +627,7 @@ class TestSpeciesList(unittest.TestCase):
     def test_all_species_have_fitted_coefficients(self):
         """Test that all species have fitted coefficients after from_ct_mech."""
         species_list = SpeciesList.from_ct_mech(
-            str(self.mech_file), Tmin=300, Tmax=3000, Tmid=1000
+            str(self.mech_file), Tmin=300, Tmax=3000, Tmid=1000, plot=False
         )
 
         for sp in species_list.species:
@@ -641,7 +643,7 @@ class TestSpeciesList(unittest.TestCase):
         Tmid = 1200.0
 
         species_list = SpeciesList.from_ct_mech(
-            str(self.mech_file), Tmin=Tmin, Tmax=Tmax, Tmid=Tmid
+            str(self.mech_file), Tmin=Tmin, Tmax=Tmax, Tmid=Tmid, plot=False
         )
 
         # Check that all species have the correct temperature bounds
@@ -654,7 +656,7 @@ class TestSpeciesList(unittest.TestCase):
     def test_write_foam_creates_files(self):
         """Test that write_foam creates OpenFOAM files."""
         species_list = SpeciesList.from_ct_mech(
-            str(self.mech_file), Tmin=300, Tmax=3000, Tmid=1000
+            str(self.mech_file), Tmin=300, Tmax=3000, Tmid=1000, plot=False
         )
 
         # Create temporary directory
@@ -679,7 +681,7 @@ class TestSpeciesList(unittest.TestCase):
         """Test that species names match Cantera mechanism."""
         gas = ct.Solution(str(self.mech_file))
         species_list = SpeciesList.from_ct_mech(
-            str(self.mech_file), Tmin=300, Tmax=3000, Tmid=1000
+            str(self.mech_file), Tmin=300, Tmax=3000, Tmid=1000, plot=False
         )
 
         dataset_names = [sp.name for sp in species_list.species]
@@ -700,7 +702,7 @@ class TestIntegrationEndToEnd(unittest.TestCase):
 
         # Load and fit (happens in constructor)
         species_list = SpeciesList.from_ct_mech(
-            str(mech_file), Tmin=300, Tmax=3000, Tmid=1000
+            str(mech_file), Tmin=300, Tmax=3000, Tmid=1000, plot=False
         )
 
         # Check all species fitted
@@ -722,7 +724,7 @@ class TestIntegrationEndToEnd(unittest.TestCase):
         mech_file = test_data_dir / "h2o2_mod.yaml"
 
         species_list = SpeciesList.from_ct_mech(
-            str(mech_file), Tmin=300, Tmax=3000, Tmid=1000
+            str(mech_file), Tmin=300, Tmax=3000, Tmid=1000, plot=False
         )
 
         # Get a species and export it

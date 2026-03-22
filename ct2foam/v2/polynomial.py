@@ -1,5 +1,7 @@
 """Standard or log-polynomial transport models."""
 
+from typing import Self
+
 import numpy as np
 import cantera as ct
 
@@ -17,7 +19,7 @@ class Polynomial:
         self.poly_type = poly_type
 
     @classmethod
-    def from_ct(cls, gas: ct.Solution, species: ct.Species, poly_type: str, n: int = 100):
+    def from_ct(cls, gas: ct.Solution, species: ct.Species, poly_type: str, n: int = 100) -> Self:
         """
         Build from ct. TODO
         """
