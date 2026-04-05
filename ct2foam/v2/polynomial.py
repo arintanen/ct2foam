@@ -69,7 +69,7 @@ class Polynomial:
             T: Temperature array
             mu: Viscosity data
             kappa: Thermal conductivity data
-            poly_order: Polynomial order (default 3)
+            poly_order: Polynomial order (default 3 from CHEMKIN)
 
         Returns:
             Polynomial instance with poly_type='log_polynomial'

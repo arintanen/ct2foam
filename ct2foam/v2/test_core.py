@@ -145,6 +145,45 @@ class TestNASA7PolynomialBasics(unittest.TestCase):
         jump = abs(s_hi - s_lo)
         self.assertLess(jump, 1e-4)
 
+    def test_foam_comparison(self):
+        T = 400.0
+        # H2O taken from OF8 tutorials
+        Tmid = 1000.0
+        c_lo = np.array(
+            (
+                3.38684,
+                0.00347498,
+                -6.3547e-06,
+                6.96858e-09,
+                -2.50659e-12,
+                -30208.1,
+                2.59023,
+            )
+        )
+        c_hi = np.array(
+            (
+                2.67215,
+                0.00305629,
+                -8.73026e-07,
+                1.201e-10,
+                -6.39162e-15,
+                -29899.2,
+                6.86282,
+            )
+        )
+        nasa = NASA7Polynomial(c_lo, c_hi, Tmid, H2O_TMIN, H2O_TMAX)
+        R = R_OF
+        cp = R * nasa.cp_over_R(T)
+        h = R * T * nasa.h_over_RT(T)
+        s = R * nasa.s_over_R(T)
+        cp_foam = 34437.7070272785
+        h_foam = -238388055.112524
+        s_foam = 198687.554172766
+        eps = 1e-12
+        self.assertTrue(np.abs(cp - cp_foam) / np.abs(cp_foam) < eps)
+        self.assertTrue(np.abs(h - h_foam) / np.abs(h_foam) < eps)
+        self.assertTrue(np.abs(s - s_foam) / np.abs(s_foam) < eps)
+
 
 class TestNASA7PolynomialCanteraConsistency(unittest.TestCase):
 
@@ -857,6 +896,68 @@ class TestEdgeCases(unittest.TestCase):
         kappa = suth.kappa(T, cv_mole, W, R)
         self.assertTrue(np.isfinite(kappa))
 
+    # def test_mixture_thermo(self):
+    #     mech = "gri30.yaml"
+    #     mix_name = "test"
+    #     ct_mixture = "O2: 1, N2: 3.76"
+    #     nasa7_Tmid = 1000.0
+    #     data = ct_properties.ctThermoTransport(mech, verbose=False)
+    #     data.evaluate_mixture_properties(mix_name, ct_mixture)
+    #     thermo_fits = ct2foam_utils.fit_mixture_thermo(data)
+    #     success = ct2foam_utils.nasa7_fit_quality(
+    #         data, thermo_fits, test_data_dir, plot=False
+    #     )
+    #
+    #     cp_ref = 1.15e3
+    #     cp = (
+    #         R
+    #         * th_fitter.cp_nasa7(nasa7_Tmid, nasa7_Tmid, thermo_fits[0], thermo_fits[1])
+    #         / data.W
+    #     )
+    #
+    #     self.assertTrue(success)
+    #     self.assertTrue(np.abs(cp - cp_ref) / np.abs(cp_ref) < 0.01)
+    #
+    # def test_thermo_foam_writer(self):
+    #
+    #     test_file = Path(test_data_dir, "testDict")
+    #     foam_file_ref = Path(test_data_dir, "OF_reference", "refDict")
+    #
+    #     name = "C2H2"
+    #     W = 1.123
+    #     As = 1.123
+    #     Ts = 2.234
+    #     poly_mu = np.flip([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
+    #     poly_kappa = np.flip([0.9, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7])
+    #     logpoly_mu = np.flip([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
+    #     logpoly_kappa = np.flip([0.9, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7])
+    #     nasa7_Tmid = 1000.0
+    #     nasa7_Tlo, nasa7_Thi = 200, 5000
+    #     nasa7_lo = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    #     nasa7_hi = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    #     elements = {"C": 2, "H": 2}
+    #     foam_writer.write_thermo_transport(
+    #         test_file,
+    #         name,
+    #         W,
+    #         As,
+    #         Ts,
+    #         poly_mu,
+    #         poly_kappa,
+    #         logpoly_mu,
+    #         logpoly_kappa,
+    #         nasa7_Tmid,
+    #         nasa7_Tlo,
+    #         nasa7_Thi,
+    #         nasa7_lo,
+    #         nasa7_hi,
+    #         elements=elements,
+    #     )
+    #     value = os.system("diff -q " + str(test_file) + " " + str(foam_file_ref))
+    #     self.assertTrue(value == 0)
+    #     # clean-up
+    #     test_file.unlink()
+    #
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,9 @@ def init_dirs(output_dir=None):
     return output_dir
 
 
+# TODO: add tolerance limits to avoid error. Add print help.
+# TODO: remove test data
+# TODO: how many n points?
 def main():
     parser = argparse.ArgumentParser(
         description='Convert/refit cantera-based transport and thermodynamic data into OpenFOAM format.')

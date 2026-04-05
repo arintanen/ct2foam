@@ -1,4 +1,28 @@
-"""NASA7 polynomial coefficient class for thermodynamic properties."""
+"""
+Class for evaluation and fitting of the NASA 7-term polynomial system based on SP-272,
+Gordon and McBride 1971:
+- Eq. 90: cp0/R=a1+a2T+a3*T^2+a4*T^3+a5*T^4
+- Eq. 91: H0_T/(RT)=a1+a2/2*T+a3/3*T^2+a4/4*T^3+a5/5*T^4+a6/T
+- Eq. 92: S0_T/R=a1*ln(T)+a2*T+a3/2*T^2+a4/3*T^3+a5/4*T^4+a7
+
+Depending on the initial data, the NASA polynomial fitting can be made by either
+of the following methods:
+
+1) Fit the specific heat (Cp) only and obtain the additional coefficients for entropy
+(s) and enthalpy (h) by analytical integration. The approach is valid only if enthalpy
+and entropy data is thermodynamically consistent with the specific heats.
+
+2) Create a simultaneous least squares fit for specific heat, enthalpy and entropy
+by considering the whole system with prescribed constraints. Ideal for experimental
+data fits or for refitting low-quality numerical data.
+
+References and further information on the NASA polynomial fitting procedure:
+- https://pdfs.semanticscholar.org/4920/6eb96b41fcbc8b19526b2cf2a3b10e02e0b1.pdf
+- http://shepherd.caltech.edu/EDL/publications/reprints/RefittingThermoDataNew.pdf
+- https://ntrs.nasa.gov/archive/nasa/casi.ntrs.nasa.gov/19930003779.pdf
+- https://ntrs.nasa.gov/api/citations/19940013151/downloads/19940013151.pdf
+"""
+
 
 from typing import Callable, Self
 from numpy import typing as npt
@@ -7,7 +31,7 @@ from dataclasses import dataclass
 import cantera as ct
 import numpy as np
 
-from ct2foam.thermo_transport import lsqlin
+from ct2foam.v2 import lsqlin
 
 _Tstd = 298.15
 
@@ -151,10 +175,12 @@ class NASA7Polynomial:
 
     @staticmethod
     def _cp(c, T):
+        """cp(T)/R"""
         return c[0] + c[1] * T + c[2] * pow(T, 2) + c[3] * pow(T, 3) + c[4] * pow(T, 4)
 
     @staticmethod
     def _h(c, T):
+        """h(T)/TR"""
         return (
             c[0]
             + c[1] * T / 2
@@ -166,6 +192,7 @@ class NASA7Polynomial:
 
     @staticmethod
     def _s(c, T):
+        """s(T)/R"""
         return (
             c[0] * np.log(T)
             + c[1] * T
@@ -177,6 +204,7 @@ class NASA7Polynomial:
 
     @staticmethod
     def _dcpdT(c, T):
+        """(1/R) * dcp(T)/dT"""
         return c[1] + 2.0 * c[2] * T + 3.0 * c[3] * pow(T, 2) + 4.0 * c[4] * pow(T, 3)
 
     # -- public full-range evaluators --
@@ -224,7 +252,32 @@ class NASA7Polynomial:
 
     @classmethod
     def fit_cp_only(cls, data: ThermoData, Tmin, Tmax, Tcommon):
-        """Fit NASA7 coefficients using cp/R data only.
+        """
+        Fit NASA7 coefficients using specific heat (cp/R) data only and obtain
+        the additional coefficients for entropy (s) and enthalpy (h) by analytical
+        integration. This approach is valid only if data originates from an earlier
+        high-quality fit or is derived from partition functions, i.e. input entropy
+        and enthalpy must be thermodynamically consistent with the specific heat data.
+
+        The present fit procedure considers the following features:
+        - Ensures C1 continuity at T=Tcommon
+        - Cp(298.15) is constrained to match the known enthalpy of formation.
+        - The entropy and enthalpy are analytically constrained to be continuous
+          at T=Tcommon.
+
+        In the fitting procedure we solve linear constrained l2-regularized least
+        squares problem by using CVXOPT QP solver. The fit problem can be written
+        as follows:
+
+        min_x ||C*x  - d||^2_2 + reg * ||x||^2_2
+        s.t.  A * x <= b
+            Aeq * x = beq
+            lb <= x <= ub
+
+        Notes:
+        - Note that multiplying with a fraction prior to the exponent
+        ((1./2.)**(1./3.)*T)**3 ensures higher numerical arithmetic accuracy
+
         Returns:
             NASA7Polynomial instance
         """
@@ -251,12 +304,16 @@ class NASA7Polynomial:
             C[:Nl, i] = pow(T_low, i)
             C[Nl : Nl + Nh, i + M] = pow(T_high, i)
 
+        # For the right hand side
         d[:Nl] = cp_over_R[0 : Tc_i + 1]
         d[Nl : Nl + Nh] = cp_over_R[Tc_i:]
 
+        # Constraint matrix and rhs
         Aeq = np.zeros((5, 2 * M))
         beq = np.zeros(5)
 
+        # C0 continuity at Tcommon and
+        # equal first and last element values
         for i in range(M):
             Aeq[0, i] = Tcommon**i
             Aeq[0, i + M] = -(Tcommon**i)
@@ -269,6 +326,7 @@ class NASA7Polynomial:
         beq[2] = cp0_over_R
         beq[3] = cp_over_R[-1]
 
+        # C1 continuity at Tcommon
         Aeq[4, 1] = 1.0
         Aeq[4, 2] = 2.0 * Tcommon
         Aeq[4, 3] = ((3.0 ** (1.0 / 2.0)) * Tcommon) ** 2
@@ -293,6 +351,7 @@ class NASA7Polynomial:
         )
         coeffs_tmp = sol["x"]
 
+        # fill the coefficient matrix
         coeffs = np.zeros(14)
         for i in range(5):
             coeffs[i] = coeffs_tmp[i]
@@ -306,7 +365,23 @@ class NASA7Polynomial:
 
     @classmethod
     def fit_full(cls, data: ThermoData, Tmin, Tmax, Tcommon):
-        """Fit NASA7 coefficients using cp, h, and s data simultaneously.
+        """Fit NASA7 coefficients using cp, h, and s data simultaneously by considering
+        the whole system with prescribed constraints. Ideal for experimental data or
+        for refitting low-quality numerical data.
+
+        In the fitting procedure we solve linear constrained l2-regularized least
+        squares problem by using CVXOPT QP solver. The fit problem can be written
+        as follows:
+
+        min_x ||C*x  - d||^2_2 + reg * ||x||^2_2
+        s.t.  A * x <= b
+            Aeq * x = beq
+            lb <= x <= ub
+
+        Notes:
+        - Note that multiplying with a fraction prior to the exponent
+        ((1./2.)**(1./3.)*T)**3 ensures higher numerical arithmetic accuracy
+
         Returns:
             NASA7Polynomial instance
         """
@@ -399,14 +474,18 @@ class NASA7Polynomial:
         d[i7:i8] = s_over_R_H - s0_over_R
 
         # Constraints
+        # Note, you can add here constraints if e.g. max values are known etc.
         Aeq = np.zeros((3, 2 * M))
         beq = np.zeros(3)
 
+        # C0 continuity at Tcommon
+        # (presumably no knowledge on min/max/std values)
         for i in range(5):
             Aeq[0, i] = Tcommon**i
             Aeq[0, i + M] = -(Tcommon**i)
             Aeq[2, i] = _Tstd**i
 
+        # C1 continuity at Tcommon
         Aeq[1, 1] = 1.0
         Aeq[1, 2] = 2.0 * Tcommon
         Aeq[1, 3] = ((3.0 ** (1.0 / 2.0)) * Tcommon) ** 2
@@ -416,7 +495,30 @@ class NASA7Polynomial:
         Aeq[1, 3 + M] = -(((3.0 ** (1.0 / 2.0)) * Tcommon) ** 2)
         Aeq[1, 4 + M] = -(((4.0 ** (1.0 / 3.0)) * Tcommon) ** 3)
 
+        # Constraint RHS (not mandatory)
         beq[2] = cp0_over_R
+
+        # Notes on constraints:
+        # - C0 continuity is guaranteed after solution by analytical correction,
+        # see _correct_coeffs()
+        # - forcing the constraints to the linear solution (see below),
+        # typically results in poor solution.
+        #
+        # # h : C0 continuity
+        # Aeq[2,0] = 1. - __T_std/Tcommon
+        # Aeq[2,M] = -(1. - __T_std/Tcommon)
+        # for i in range(1,5):
+        #     cf = (1./(i+1))**(1./i)
+        #     Aeq[2,i] = (cf*Tcommon)**i - (__T_std/Tcommon)*(cf*__T_std)**i
+        #     Aeq[2,i+M] = -((cf*Tcommon)**i - (__T_std/Tcommon)*(cf*__T_std)**i)
+        #
+        # # s : C0 continuity
+        # Aeq[3,0] = np.log(Tcommon/__T_std)
+        # Aeq[3,M] = -np.log(Tcommon/__T_std)
+        # for i in range(1,5):
+        #     cf = (1./i)**(1./i)
+        #     Aeq[3,i] = (cf*Tcommon)**i - (cf*__T_std)**i
+        #     Aeq[3,i+M] = -(cf*Tcommon)**i + (cf*__T_std)**i
 
         sol = lsqlin.lsqlin(
             C,
@@ -433,6 +535,7 @@ class NASA7Polynomial:
         )
         coeffs_tmp = sol["x"]
 
+        # fill the coefficient matrix
         coeffs = np.zeros(14)
         for i in range(5):
             coeffs[i] = coeffs_tmp[i]
@@ -443,10 +546,19 @@ class NASA7Polynomial:
 
     @staticmethod
     def _correct_coeffs(coeffs, Tcommon, dhf_over_R, s0_over_R):
-        """Solve for integration constants ensuring continuity at Tcommon."""
+        """
+        Solving additional constant over means of conservation of enthalpy and entropy
+        and ensuring C0 continuity at T=Tcommon
+        coeffs = 14 size nasa coeffs without Tcommon in 0.
+        coeffs: array [M=14,] of NASA7 coefficients for low/high temperature range.
+        dhf_over_R: enthalpy of formation at standard conditions.
+        s0_over_R: entropy at standard conditions.
+
+        return coeffs
+        """
         T_std = _Tstd
 
-        # coeff[5]: enthalpy at standard conditions
+        # coeff[5]: enthalpy of formation at standard conditions
         coeffs[5] = dhf_over_R - (
             coeffs[0] * T_std
             + coeffs[1] * ((1.0 / 2.0) ** (1.0 / 2.0) * T_std) ** 2
