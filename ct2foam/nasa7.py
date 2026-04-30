@@ -23,7 +23,6 @@ References and further information on the NASA polynomial fitting procedure:
 - https://ntrs.nasa.gov/api/citations/19940013151/downloads/19940013151.pdf
 """
 
-
 from typing import Callable, Self
 from numpy import typing as npt
 from dataclasses import dataclass
@@ -31,9 +30,10 @@ from dataclasses import dataclass
 import cantera as ct
 import numpy as np
 
-from ct2foam.v2 import lsqlin
+from ct2foam import lsqlin
 
 _Tstd = 298.15
+
 
 @dataclass
 class ThermoData:
@@ -56,9 +56,7 @@ class ThermoData:
 
     @classmethod
     def from_ct(
-        cls,
-        species: ct.Species,
-        temperature: npt.NDArray[np.floating]
+        cls, species: ct.Species, temperature: npt.NDArray[np.floating]
     ) -> Self:
         """
         Evaluate data for fitting based on Cantera species.
@@ -105,8 +103,8 @@ class NASA7Polynomial:
         Tmin: float,
         Tmax: float,
         Tmid: float,
-        n: int=128,
-        tol_c0: float=1e-6
+        n: int = 128,
+        tol_c0: float = 1e-6,
     ) -> Self:
         """
         Construct from Cantera Species object
@@ -249,7 +247,6 @@ class NASA7Polynomial:
         result[hi] = self._dcpdT(self.coeffs_high, T[hi])
         return result
 
-
     @classmethod
     def fit_cp_only(cls, data: ThermoData, Tmin, Tmax, Tcommon):
         """
@@ -290,7 +287,6 @@ class NASA7Polynomial:
 
         cp_over_R = data.cp / data.gas_constant
         cp0_over_R = data.cp0 / data.gas_constant
-
 
         Nl = len(T_low)
         Nh = len(T_high)
@@ -631,12 +627,12 @@ class NASA7Polynomial:
         # Consistency with reference data
         R = data.gas_constant
         T = data.temperature
-        dcp = np.abs(data.cp/R - self.cp_over_R(T))
-        err_cp = np.linalg.norm(dcp) / np.linalg.norm(data.cp/R)
-        dh = np.abs(data.h/(R*T) - self.h_over_RT(T))
-        err_h = np.linalg.norm(dh) / np.linalg.norm(data.h/(R*T))
-        ds = np.abs(data.s/R - self.s_over_R(T))
-        err_s = np.linalg.norm(ds) / np.linalg.norm(data.s/R)
+        dcp = np.abs(data.cp / R - self.cp_over_R(T))
+        err_cp = np.linalg.norm(dcp) / np.linalg.norm(data.cp / R)
+        dh = np.abs(data.h / (R * T) - self.h_over_RT(T))
+        err_h = np.linalg.norm(dh) / np.linalg.norm(data.h / (R * T))
+        ds = np.abs(data.s / R - self.s_over_R(T))
+        err_s = np.linalg.norm(ds) / np.linalg.norm(data.s / R)
 
         quality = {
             "c0_continuity": c0,
@@ -644,7 +640,6 @@ class NASA7Polynomial:
         }
         self.quality = quality
         return quality
-
 
     def c0_continuity(self, func: Callable):
         """

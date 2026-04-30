@@ -13,11 +13,11 @@ from pathlib import Path
 
 import cantera as ct
 
-from ct2foam.v2.nasa7 import NASA7Polynomial, ThermoData
+from ct2foam.nasa7 import NASA7Polynomial, ThermoData
 
-from ct2foam.v2.sutherland import Sutherland
-from ct2foam.v2.polynomial import Polynomial
-from ct2foam.v2.species import Species, SpeciesList
+from ct2foam.sutherland import Sutherland
+from ct2foam.polynomial import Polynomial
+from ct2foam.species import Species, SpeciesList
 
 # Note, OF_reference/Test-thermoMixture.C
 # is used as a source of the reference data tested here.
@@ -186,7 +186,6 @@ class TestNASA7PolynomialBasics(unittest.TestCase):
 
 
 class TestNASA7PolynomialCanteraConsistency(unittest.TestCase):
-
     def setUp(self):
         self.gas = ct.Solution("h2o2.yaml")
         self.R = ct.gas_constant
@@ -304,7 +303,6 @@ class TestNASA7PolynomialFitting(unittest.TestCase):
         self.assertLessEqual(eps, 8e-3)
 
     def test_fit_cp_only(self):
-
         nasa7 = NASA7Polynomial.fit_cp_only(
             self.data, self.Tmin, self.Tmax, self.Tcommon
         )
@@ -326,7 +324,6 @@ class TestNASA7PolynomialFitting(unittest.TestCase):
         np.testing.assert_allclose(cp_fit_high, cp_ref_high, rtol=1.5e-3)
 
     def test_fit_full(self):
-
         nasa7 = NASA7Polynomial.fit_full(self.data, self.Tmin, self.Tmax, self.Tcommon)
 
         self.assertIsNotNone(nasa7)
@@ -440,7 +437,9 @@ class TestNASA7PolynomialFitting(unittest.TestCase):
         dhf_over_R = 5.0
         s0_over_R = 150.0
 
-        corrected = NASA7Polynomial._correct_coeffs(coeffs, Tcommon, dhf_over_R, s0_over_R)
+        corrected = NASA7Polynomial._correct_coeffs(
+            coeffs, Tcommon, dhf_over_R, s0_over_R
+        )
 
         # Should return 14-element array
         self.assertEqual(len(corrected), 14)
@@ -958,6 +957,7 @@ class TestEdgeCases(unittest.TestCase):
     #     # clean-up
     #     test_file.unlink()
     #
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,7 @@ from .nasa7 import ThermoData
 
 from .sutherland import Sutherland
 from .polynomial import Polynomial
-import ct2foam.v2.foam_writer as writer
+import ct2foam.foam_writer as writer
 
 
 class Species:
@@ -299,7 +299,7 @@ class SpeciesList:
                 spi.plot_nasa7_fit(
                     species=ct_spi,
                     nasa7=spi.nasa7,
-                    file_path=Path(fig_dir, f"{spi.name}_thermo.png")
+                    file_path=Path(fig_dir, f"{spi.name}_thermo.png"),
                 )
                 spi.plot_transport_fits(
                     gas,
