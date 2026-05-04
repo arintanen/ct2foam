@@ -3,20 +3,18 @@ from datetime import date
 from pathlib import Path
 
 
-from ct2foam.v2.species import SpeciesList
-
+from ct2foam.species import SpeciesList
+from ct2foam.mixture import Mixture
 
 # TODO:
-# 2) move v2 into the main dir
 # 3) keep test_mech2Foam from old tests
-# 4) How do we deal with mixture based nasa polynomial?
-# 4) uncomment the foam_writer and mixture test from cores
 # 4) Test that output files are 1-1
 # TODO: add tolerance limits to avoid error. Add print help.
 # TODO: remove test data
 # TODO: how many n points?
 # TODO: Add README examples
 # LICENSE + docstrings - CHECK lsqlin MIT licence - is it contaminating this to MIT as well?
+# Go through the original TODO.md
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -84,7 +82,7 @@ def main():
         action="store_true",
         help="Generate plots when available.",
         required=False,
-    )
+)
     args = parser.parse_args()
 
     mechanism = args.input
@@ -104,8 +102,22 @@ def main():
 
     if args.mixture_name:
         print("Creating mixture - " + str(args.mixture_name) + ": " + args.mixture)
-        # TODO: add here
-        print("Done")
+        mixture = Mixture.from_ct(
+            mechanism_file=mechanism,
+            mixture_name=args.mixture_name,
+            mixture=args.mixture,
+            Tmin=280.0,
+            Tmax=3000.0,
+            Tmid=1000.0,
+            n=256,
+            plot=True,
+            fig_dir=fig_dir,
+            tol=1e-2,
+            tol_c0=1e-6
+        )
+
+        mixture.write_foam(output_dir)
+        print("\nDone")
         return
 
     species_list = SpeciesList.from_ct_mech(

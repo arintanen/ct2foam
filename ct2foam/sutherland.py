@@ -13,19 +13,30 @@ class Sutherland:
         self.std_err = std_err if std_err is None else np.asarray(std_err, dtype=float)
 
     @classmethod
-    def from_ct(cls, gas: ct.Solution, species: ct.Species, n: int = 128) -> Self:
+    def from_ct(
+        cls,
+        gas: ct.Solution,
+        species: ct.Species | None = None,
+        n: int = 128,
+        Tmin: float = 300,
+        Tmax: float = 3000
+    ) -> Self:
         """
         Mention here that we made a decision to respect cantera Tmin/Tmax limits for now.
         """
-        Tmin = species.thermo.min_temp
-        Tmax = species.thermo.max_temp
+        # For mixtures, we retain the existing X
+        X = gas.X
 
-        reactants = species.name + ":1.0"
+        # Species based values always prevails
+        if species:
+            Tmin = species.thermo.min_temp
+            Tmax = species.thermo.max_temp
+            X = species.name + ":1.0"
 
         T = np.linspace(Tmin, Tmax, n)
         mu = np.zeros(n)
         for i, Ti in enumerate(T):
-            gas.TPX = Ti, ct.one_atm, reactants
+            gas.TPX = Ti, ct.one_atm, X
             mu[i] = gas.viscosity
 
         return cls.fit(T, mu)

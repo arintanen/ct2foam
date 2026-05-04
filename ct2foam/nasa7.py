@@ -65,6 +65,7 @@ class ThermoData:
         Discrepancy is O(1e-9) but enough to influence unit tests compared to old version.
         One needs to be careful when comparin 1-1 results between old and new.
         """
+        # Note, thermo class properties are molar values
         cp0 = species.thermo.cp(_Tstd)
         dhf = species.thermo.h(_Tstd)
         s0 = species.thermo.s(_Tstd)
@@ -73,10 +74,33 @@ class ThermoData:
         h = np.zeros_like(temperature)
         s = np.zeros_like(temperature)
         for i, Ti in enumerate(temperature):
-            # Base thermo functions return molar values
             cp[i] = species.thermo.cp(Ti)
             h[i] = species.thermo.h(Ti)
             s[i] = species.thermo.s(Ti)
+
+        return cls(ct.gas_constant, temperature, cp, h, s, cp0, dhf, s0)
+
+
+    @classmethod
+    def from_ct_mixture(
+        cls, gas: ct.Solution, temperature: npt.NDArray[np.floating]
+    ) -> Self:
+        """
+        Evaluate data for fitting based on Cantera Solution object.
+        """
+        gas.TP = _Tstd, ct.one_atm
+        cp0 = gas.cp_mole
+        dhf = gas.enthalpy_mole
+        s0 = gas.entropy_mole
+
+        cp = np.zeros_like(temperature)
+        h = np.zeros_like(temperature)
+        s = np.zeros_like(temperature)
+        for i, Ti in enumerate(temperature):
+            gas.TP = Ti, ct.one_atm
+            cp[i] = gas.cp_mole
+            h[i] = gas.enthalpy_mole
+            s[i] = gas.entropy_mole
 
         return cls(ct.gas_constant, temperature, cp, h, s, cp0, dhf, s0)
 
@@ -168,6 +192,32 @@ class NASA7Polynomial:
         nasa7 = cls.fit_full(thermo_data, Tmin, Tmax, Tmid)
         nasa7.fit_quality(thermo_data)
         return nasa7
+
+    @classmethod
+    def from_ct_mixture(
+        cls,
+        gas: ct.Solution,
+        Tmin: float,
+        Tmax: float,
+        Tmid: float,
+        n: int = 128
+    ) -> Self:
+        """
+        Construct from Cantera Solution object
+        """
+
+        print(f"\nGenerating NASA7 polynomial for mixture")
+
+        _n = int(n / 2)
+        _Tl = np.linspace(Tmin, Tmid, _n, endpoint=False)
+        _Th = np.linspace(Tmid, Tmax, _n)
+        T = np.concatenate((_Tl, _Th))
+        thermo_data = ThermoData.from_ct_mixture(gas, T)
+
+        nasa7 = cls.fit_full(thermo_data, Tmin, Tmax, Tmid)
+        nasa7.fit_quality(thermo_data)
+        return nasa7
+
 
     # -- private single-range evaluators --
 

@@ -19,21 +19,33 @@ class Polynomial:
         self.poly_type = poly_type
 
     @classmethod
-    def from_ct(cls, gas: ct.Solution, species: ct.Species, poly_type: str, n: int = 100) -> Self:
+    def from_ct(
+            cls,
+            gas: ct.Solution,
+            species: ct.Species | None = None,
+            poly_type: str = "polynomial",
+            n: int = 100,
+            Tmin: float = 300,
+            Tmax: float = 3000
+    ) -> Self:
         """
         Build from ct. TODO
         """
-        Tmin = species.thermo.min_temp
-        Tmax = species.thermo.max_temp
+        # For mixtures, we retain the existing X
+        X = gas.X
 
-        reactants = species.name + ":1.0"
+        # Species based values always prevails
+        if species:
+            Tmin = species.thermo.min_temp
+            Tmax = species.thermo.max_temp
+            X = species.name + ":1.0"
 
         T = np.linspace(Tmin, Tmax, n)
         mu = np.zeros(n)
         kappa = np.zeros(n)
 
         for i, Ti in enumerate(T):
-            gas.TPX = Ti, ct.one_atm, reactants
+            gas.TPX = Ti, ct.one_atm, X
             mu[i] = gas.viscosity
             kappa[i] = gas.thermal_conductivity
 
