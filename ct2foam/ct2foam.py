@@ -7,11 +7,11 @@ from ct2foam.species import SpeciesList
 from ct2foam.mixture import Mixture
 
 # TODO:
-# 3) keep test_mech2Foam from old tests
 # 4) Test that output files are 1-1
 # TODO: add tolerance limits to avoid error. Add print help.
 # TODO: remove test data
 # TODO: how many n points?
+# TODO: go through TODOS
 # TODO: Add README examples
 # LICENSE + docstrings - CHECK lsqlin MIT licence - is it contaminating this to MIT as well?
 # Go through the original TODO.md
@@ -27,22 +27,8 @@ def main():
         "-i",
         "--input",
         type=str,
-        help="Cantera mechanism (.yaml/.yaml/.xml) file path.",
+        help="Cantera mechanism (.yaml/.xml) file path.",
         required=True,
-    )
-    parser.add_argument(
-        "-n",
-        "--mixture_name",
-        type=str,
-        help='(Optional) Mixture name, e.g. "air".',
-        required=False,
-    )
-    parser.add_argument(
-        "-m",
-        "--mixture",
-        type=str,
-        help='(Optional) Molecular mixture ratio in cantera style: "O2:1, N2:3.76" ',
-        required=False,
     )
     parser.add_argument(
         "-o",
@@ -77,10 +63,24 @@ def main():
         required=False,
     )
     parser.add_argument(
+        "-n",
+        "--mixture_name",
+        type=str,
+        help='(Optional) Mixture name, e.g. "air".',
+        required=False,
+    )
+    parser.add_argument(
+        "-m",
+        "--mixture",
+        type=str,
+        help='(Optional) Molecular mixture ratio in cantera style: "O2:1, N2:3.76" ',
+        required=False,
+    )
+    parser.add_argument(
         "-p",
         "--plot",
         action="store_true",
-        help="Generate plots when available.",
+        help="(Optional) Generate plots when available.",
         required=False,
 )
     args = parser.parse_args()
@@ -100,6 +100,7 @@ def main():
     print("Date: " + str(today.strftime("%B %d, %Y")))
     print("Using Mechanism: " + mechanism)
 
+    # Generate output for a mixture
     if args.mixture_name:
         print("Creating mixture - " + str(args.mixture_name) + ": " + args.mixture)
         mixture = Mixture.from_ct(
@@ -120,6 +121,7 @@ def main():
         print("\nDone")
         return
 
+    # Generate output for individual species
     species_list = SpeciesList.from_ct_mech(
         mechanism,
         Tmin=280.0,
@@ -132,7 +134,6 @@ def main():
         tol_c0=1e-6
     )
     species_list.write_foam(output_dir)
-
     print("\nDone")
 
 

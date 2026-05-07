@@ -1,4 +1,4 @@
-from ct2foam.scripts import mech2foam
+from ct2foam.ct2foam import main
 
-if(__name__ == '__main__'):
-    mech2foam.main()
+if __name__ == "__main__":
+    main()
