@@ -213,6 +213,7 @@ class Mixture:
 
     # TODO: clean this up after everything else is done.
     # And clean as this is a dupplicate
+    # Species not needed to be written but we oculd write for consistency. Now it writes each string character separately. Mayble listify
     def write_foam(self, output_dir):
         """Write OpenFOAM output files using foam_writer.
 

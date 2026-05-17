@@ -6,9 +6,6 @@ from pathlib import Path
 from ct2foam.species import SpeciesList
 from ct2foam.mixture import Mixture
 
-# TODO:
-# 4) Test that output files are 1-1
-# TODO: add tolerance limits to avoid error. Add print help.
 # TODO: remove test data
 # TODO: how many n points?
 # TODO: go through TODOS
@@ -18,9 +15,8 @@ from ct2foam.mixture import Mixture
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Convert/refit cantera-based transport and thermodynamic"
-            "data into OpenFOAM format. To fit data for mixtures, user"
-            "can define --mixture argument."
+            "Convert cantera-based transport and thermodynamic"
+            " data into OpenFOAM format."
         )
     )
     parser.add_argument(
@@ -42,7 +38,7 @@ def main():
         "-T",
         "--Tmid",
         type=float,
-        help="Common temperature for NASA-7 thermodynamical fits.",
+        help="Common temperature for NASA-7 polynomials.",
         default=1000.0,
         required=False,
     )
@@ -50,7 +46,7 @@ def main():
         "-Tl",
         "--Tlow",
         type=float,
-        help="Temperature low-limit for NASA-7 thermodynamical fits.",
+        help="Temperature low-limit for NASA-7 polynomials.",
         default=280.0,
         required=False,
     )
@@ -58,7 +54,7 @@ def main():
         "-Th",
         "--Thigh",
         type=float,
-        help="Temperature high-limit for NASA-7 thermodynamical fits.",
+        help="Temperature high-limit for NASA-7 polynomials.",
         default=3000.0,
         required=False,
     )
@@ -80,9 +76,26 @@ def main():
         "-p",
         "--plot",
         action="store_true",
-        help="(Optional) Generate plots when available.",
+        help="(Optional) Generate plots for fitted variables.",
         required=False,
-)
+    )
+    parser.add_argument(
+        "-t",
+        "--tol",
+        type=float,
+        help="(Optional) Tolerance for NASA-7 polynomial fit error.",
+        default=1e-2,
+        required=False,
+    )
+    parser.add_argument(
+        "-tc0",
+        "--tol-c0",
+        type=float,
+        help="(Optional) Tolerance for NASA-7 polynomial C0 continuity.",
+        default=1e-6,
+        required=False,
+    )
+
     args = parser.parse_args()
 
     mechanism = args.input
@@ -113,8 +126,8 @@ def main():
             n=256,
             plot=True,
             fig_dir=fig_dir,
-            tol=1e-2,
-            tol_c0=1e-6
+            tol=args.tol,
+            tol_c0=args.tol_c0
         )
 
         mixture.write_foam(output_dir)
@@ -130,8 +143,8 @@ def main():
         n=256,
         plot=True,
         fig_dir=fig_dir,
-        tol=1e-2,
-        tol_c0=1e-6
+        tol=args.tol,
+        tol_c0=args.tol_c0
     )
     species_list.write_foam(output_dir)
     print("\nDone")
