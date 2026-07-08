@@ -15,8 +15,7 @@ import cantera as ct
 
 from ct2foam.nasa7 import NASA7Polynomial, ThermoData
 
-from ct2foam.sutherland import Sutherland
-from ct2foam.polynomial import Polynomial
+from ct2foam.transport import Sutherland, Polynomial, LogPolynomial
 from ct2foam.species import Species, SpeciesList
 
 # Note, OF_reference/Test-thermoMixture.C
@@ -542,7 +541,7 @@ class TestTransportFitting(unittest.TestCase):
         assert err < 5e-3
 
     def test_log_polynomial_fit(self):
-        poly = Polynomial.fit_log_polynomial(self.T, self.mu, self.kappa)
+        poly = LogPolynomial.fit_log_polynomial(self.T, self.mu, self.kappa)
 
         mu_fit = poly.mu(self.T)
 
@@ -560,7 +559,7 @@ class TestPolynomial(unittest.TestCase):
     def test_polynomial_mu_evaluation(self):
         """Standard polynomial mu evaluation matches np.poly1d."""
         coeffs = np.array([1e-12, -2e-9, 1e-6, 5e-5])
-        poly = Polynomial(coeffs, coeffs, poly_type="polynomial")
+        poly = Polynomial(coeffs, coeffs)
         T = 1000.0
         expected = np.poly1d(coeffs)(T)
         self.assertAlmostEqual(float(poly.mu(T)), expected, places=12)
@@ -569,7 +568,7 @@ class TestPolynomial(unittest.TestCase):
         """Standard polynomial kappa evaluation matches np.poly1d."""
         coeffs_mu = np.array([1e-12, 0, 1e-6, 0])
         coeffs_k = np.array([2e-12, 0, 2e-6, 0])
-        poly = Polynomial(coeffs_mu, coeffs_k, poly_type="polynomial")
+        poly = Polynomial(coeffs_mu, coeffs_k)
         T = 500.0
         expected = np.poly1d(coeffs_k)(T)
         self.assertAlmostEqual(float(poly.kappa(T)), expected, places=12)
@@ -577,7 +576,7 @@ class TestPolynomial(unittest.TestCase):
     def test_log_polynomial_mu_evaluation(self):
         """Log-polynomial mu = exp(P(log(T)))."""
         coeffs = np.array([0.5, -1.0, 2.0, -10.0])
-        poly = Polynomial(coeffs, coeffs, poly_type="log_polynomial")
+        poly = LogPolynomial(coeffs, coeffs)
         T = 1000.0
         expected = np.exp(np.poly1d(coeffs)(np.log(T)))
         self.assertAlmostEqual(float(poly.mu(T)), expected, places=10)
@@ -585,20 +584,15 @@ class TestPolynomial(unittest.TestCase):
     def test_log_polynomial_kappa_evaluation(self):
         """Log-polynomial kappa = exp(P(log(T)))."""
         coeffs = np.array([0.3, -0.5, 1.5, -8.0])
-        poly = Polynomial(coeffs, coeffs, poly_type="log_polynomial")
+        poly = LogPolynomial(coeffs, coeffs)
         T = 750.0
         expected = np.exp(np.poly1d(coeffs)(np.log(T)))
         self.assertAlmostEqual(float(poly.kappa(T)), expected, places=10)
 
-    def test_invalid_poly_type_raises(self):
-        """Invalid poly_type should raise ValueError."""
-        with self.assertRaises(ValueError):
-            Polynomial(np.zeros(4), np.zeros(4), poly_type="invalid")
-
     def test_polynomial_array_input(self):
         """Polynomial evaluation works with array inputs."""
         coeffs = np.array([1e-12, -2e-9, 1e-6, 5e-5])
-        poly = Polynomial(coeffs, coeffs, poly_type="polynomial")
+        poly = Polynomial(coeffs, coeffs)
         T = np.array([300.0, 500.0, 1000.0])
         result = poly.mu(T)
         self.assertEqual(result.shape, T.shape)
@@ -610,7 +604,7 @@ class TestPolynomial(unittest.TestCase):
         poly_coeffs_kappa = np.flip(np.array([2000, -0.15, 0.023, 0]))
         mu_foam = 1460.0
         kappa_foam = 5620.0
-        poly = Polynomial(poly_coeffs_mu, poly_coeffs_kappa, poly_type="polynomial")
+        poly = Polynomial(poly_coeffs_mu, poly_coeffs_kappa)
         mu = poly.mu(T)
         kappa = poly.kappa(T)
         self.assertTrue(np.abs(mu - mu_foam) / np.abs(mu_foam) < 1e-12)
@@ -623,7 +617,7 @@ class TestPolynomial(unittest.TestCase):
         poly_coeffs_kappa = np.flip(np.array([0.1, 0.1, 0.1, 0]))
         mu_foam = 72.8870655981874
         kappa_foam = 72.8870655981874
-        poly = Polynomial(poly_coeffs_mu, poly_coeffs_kappa, poly_type="log_polynomial")
+        poly = LogPolynomial(poly_coeffs_mu, poly_coeffs_kappa)
         mu = poly.mu(T)
         kappa = poly.kappa(T)
         self.assertTrue(np.abs(mu - mu_foam) / np.abs(mu_foam) < 1e-12)
