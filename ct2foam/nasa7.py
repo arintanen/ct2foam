@@ -24,8 +24,12 @@ References and further information on the NASA polynomial fitting procedure:
 """
 
 from typing import Callable, Self
+from pathlib import Path
+
 from numpy import typing as npt
 from dataclasses import dataclass
+
+from matplotlib import pyplot as plt
 
 import cantera as ct
 import numpy as np
@@ -711,3 +715,32 @@ class NASA7Polynomial:
     def is_c0_continuous(self, tol=1e-6) -> bool:
         quality = self.continuity_error()
         return max(quality["cp"], quality["dcpdT"], quality["h"], quality["s"]) < tol
+
+
+def plot_nasa7_fit(reference_data: ThermoData, nasa7: NASA7Polynomial, file_path: Path):
+    """
+    Plot NASA7 Polynomial against reference ThermoData.
+    """
+    T = reference_data.temperature
+    R = reference_data.gas_constant
+
+    fig = plt.figure(num=1, figsize=(7.5, 10))
+    ax1 = plt.subplot(311)
+    plt.plot(T, reference_data.cp / R, "-", color="r", label="reference")
+    plt.plot(T, nasa7.cp_over_R(T), "--", color="b", label="fit")
+    ax1.set_ylabel(r"$cp/R$")
+    plt.legend(loc=4)
+
+    ax2 = plt.subplot(312)
+    plt.plot(T, reference_data.h / (R * T), "-", color="r")
+    plt.plot(T, nasa7.h_over_RT(T), "--", color="b")
+    ax2.set_ylabel(r"$h/RT$")
+
+    ax3 = plt.subplot(313)
+    plt.plot(T, reference_data.s / R, "-", color="r")
+    plt.plot(T, nasa7.s_over_R(T), "--", color="b")
+    ax3.set_ylabel(r"$s/R$")
+    ax3.set_xlabel(r"$T$[K]")
+
+    fig.savefig(file_path, bbox_inches="tight")
+    plt.close()

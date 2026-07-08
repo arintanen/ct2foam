@@ -13,9 +13,13 @@ import cantera as ct
 # TODO: fix paths eventually
 from .nasa7 import NASA7Polynomial
 from .nasa7 import ThermoData
+from .nasa7 import plot_nasa7_fit
 
-from .sutherland import Sutherland
-from .polynomial import Polynomial
+from .transport import TransportData
+from .transport import Sutherland
+from .transport import Polynomial
+from .transport import LogPolynomial
+from .transport import plot_transport_fits
 import ct2foam.foam_writer as writer
 
 
@@ -46,7 +50,7 @@ class Mixture:
         self.nasa7: NASA7Polynomial = nasa7
         self.sutherland: Sutherland = sutherland
         self.polynomial: Polynomial = polynomial
-        self.log_polynomial: Polynomial = log_polynomial
+        self.log_polynomial: LogPolynomial = log_polynomial
 
     @classmethod
     def from_ct(
@@ -72,9 +76,10 @@ class Mixture:
         gas.TPX = 300, ct.one_atm, mixture
 
         nasa7 = NASA7Polynomial.from_ct_mixture(gas, Tmin, Tmax, Tmid, n)
-        sutherland = Sutherland.from_ct(gas, n=n, Tmin=Tmin, Tmax=Tmax)
-        polynomial = Polynomial.from_ct(gas, poly_type="polynomial", n=n, Tmin=Tmin, Tmax=Tmax)
-        log_polynomial = Polynomial.from_ct(gas, poly_type="log_polynomial", n=n, Tmin=Tmin, Tmax=Tmax)
+        T = np.linspace(Tmin, Tmax, n)
+        sutherland = Sutherland.from_ct(gas, T)
+        polynomial = Polynomial.from_ct(gas, T)
+        log_polynomial = LogPolynomial.from_ct(gas, T)
 
         # Check NASA7 quality raise if poor quality
         quality = nasa7.quality
@@ -92,7 +97,8 @@ class Mixture:
             import tempfile
 
             fig_path = Path(tempfile.TemporaryFile().name + ".png")
-            cls.plot_nasa7_fit(gas, nasa7, fig_path)
+            ref_data = ThermoData.from_ct_mixture(gas, T)
+            plot_nasa7_fit(ref_data, nasa7, fig_path)
             raise ValueError(
                 f"NASA7 polynomial quality failed with tol={tol}."
                 f"Overall fit quality is as follows:\n{quality}"
@@ -106,13 +112,16 @@ class Mixture:
         # Plot comparison to the reference data
         if plot:
             print(f"- Saving fit figures under {fig_dir}")
-            cls.plot_nasa7_fit(gas, nasa7, Path(fig_dir, f"{mixture_name}_thermo.png"),
+            fig_path = Path(fig_dir, f"{mixture_name}_thermo.png")
+            ref_data = ThermoData.from_ct_mixture(gas, T)
+            plot_nasa7_fit(ref_data, nasa7, fig_path)
+
+            ref_data = TransportData.from_ct(
+                gas, np.linspace(Tmin, Tmax, n)
             )
-            cls.plot_transport_fits(
-                gas,
-                sutherland=sutherland,
-                polynomial=polynomial,
-                logpolynomial=log_polynomial,
+            plot_transport_fits(
+                data=ref_data,
+                fits=[sutherland, polynomial, log_polynomial],
                 file_path=Path(fig_dir, f"{mixture_name}_transport.png"),
             )
 
@@ -125,91 +134,6 @@ class Mixture:
             polynomial=polynomial,
             log_polynomial=log_polynomial,
         )
-
-    @staticmethod
-    def plot_nasa7_fit(gas: ct.Solution, nasa7: NASA7Polynomial, file_path: Path):
-        """
-        Create comparison plots with reference data.
-        """
-
-        # TODO: below is largely duplicated from species class.
-
-        T = np.linspace(nasa7.Tlow, nasa7.Tmax, 256)
-        data = ThermoData.from_ct_mixture(gas, T)
-        R = data.gas_constant
-
-        fig = plt.figure(num=1, figsize=(7.5, 10))
-        ax1 = plt.subplot(311)
-        plt.plot(T, data.cp / R, "-", color="r", label="Orig.")
-        plt.plot(T, nasa7.cp_over_R(T), "--", color="b", label="Fit")
-        ax1.set_ylabel(r"$cp/R$")
-        plt.legend(loc=4)
-
-        ax2 = plt.subplot(312)
-        plt.plot(T, data.h / (R * T), "-", color="r")
-        plt.plot(T, nasa7.h_over_RT(T), "--", color="b")
-        ax2.set_ylabel(r"$h/RT$")
-
-        ax3 = plt.subplot(313)
-        plt.plot(T, data.s / R, "-", color="r")
-        plt.plot(T, nasa7.s_over_R(T), "--", color="b")
-        ax3.set_ylabel(r"$s/R$")
-        ax3.set_xlabel(r"$T$[K]")
-
-        fig.savefig(file_path, bbox_inches="tight")
-        plt.close()
-
-    @staticmethod
-    def plot_transport_fits(
-        gas: ct.Solution,
-        sutherland: Sutherland,
-        polynomial: Polynomial,
-        logpolynomial: Polynomial,
-        file_path: Path,
-    ):
-        """
-        Create comparison plots with reference data.
-        """
-        n = 128
-        T = np.linspace(200, 3000, n)
-        mu = np.zeros(n)
-        kappa = np.zeros(n)
-        cv_mole = np.zeros(n)
-        for i, Ti in enumerate(T):
-            gas.TPX = Ti, ct.one_atm, gas.X
-            mu[i] = gas.viscosity
-            kappa[i] = gas.thermal_conductivity
-            cv_mole[i] = gas.cv_mole
-
-        W = gas.mean_molecular_weight
-        R = ct.gas_constant
-
-        fig = plt.figure(num=2, figsize=(7.5, 10))
-        ax1 = plt.subplot(211)
-        plt.plot(T, mu, "-", color="r", label="Orig.")
-        plt.plot(T, sutherland.mu(T), "--", color="b", label="Sutherland")
-        plt.plot(T, polynomial.mu(T), "--", color="k", label="Polynomial")
-        plt.plot(T, logpolynomial.mu(T), ":", color="g", label="Log-polynomial")
-        ax1.set_ylabel(r"$\mu$")
-        plt.legend(loc=4)
-
-        ax2 = plt.subplot(212)
-        plt.plot(T, kappa, "-", color="r", label="Orig.")
-        plt.plot(
-            T,
-            sutherland.kappa(T, cv_mole, W, R),
-            "--",
-            color="b",
-            label="Sutherland (Euken)",
-        )
-        plt.plot(T, polynomial.kappa(T), "--", color="k", label="Polynomial")
-        plt.plot(T, logpolynomial.kappa(T), ":", color="k", label="Log-polynomial")
-        ax2.set_ylabel(r"$\kappa$")
-        ax2.set_xlabel(r"$T$[K]")
-        plt.legend(loc=4)
-
-        fig.savefig(file_path, bbox_inches="tight")
-        plt.close()
 
     # TODO: clean this up after everything else is done.
     # And clean as this is a dupplicate

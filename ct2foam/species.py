@@ -4,16 +4,21 @@ from typing import List
 from pathlib import Path
 from typing import Self
 
-from matplotlib import pyplot as plt
 import numpy as np
 import cantera as ct
 
 # TODO: fix paths eventually
 from .nasa7 import NASA7Polynomial
 from .nasa7 import ThermoData
+from .nasa7 import plot_nasa7_fit
 
-from .sutherland import Sutherland
-from .polynomial import Polynomial
+from .transport import (
+    Sutherland,
+    Polynomial,
+    LogPolynomial,
+    plot_transport_fits,
+    TransportData
+)
 import ct2foam.foam_writer as writer
 
 
@@ -57,7 +62,7 @@ class Species:
         self.nasa7: NASA7Polynomial = nasa7
         self.sutherland: Sutherland = sutherland
         self.polynomial: Polynomial = polynomial
-        self.log_polynomial: Polynomial = log_polynomial
+        self.log_polynomial: LogPolynomial = log_polynomial
 
     @classmethod
     def from_ct(
@@ -78,11 +83,10 @@ class Species:
         W = species.molecular_weight
         elements = species.composition
         nasa7 = NASA7Polynomial.from_ct(species, Tmin, Tmax, Tmid, n, tol_c0)
-        sutherland = Sutherland.from_ct(gas, species, n)
-        polynomial = Polynomial.from_ct(gas, species, poly_type="polynomial", n=n)
-        log_polynomial = Polynomial.from_ct(
-            gas, species, poly_type="log_polynomial", n=n
-        )
+        T = np.linspace(Tmin, Tmax, n)
+        sutherland = Sutherland.from_ct(gas, T)
+        polynomial = Polynomial.from_ct(gas, T)
+        log_polynomial = LogPolynomial.from_ct(gas, T)
 
         # Check NASA7 quality raise if poor quality
         quality = nasa7.quality
@@ -119,93 +123,6 @@ class Species:
             log_polynomial=log_polynomial,
         )
 
-    @staticmethod
-    def plot_nasa7_fit(species: ct.Species, nasa7: NASA7Polynomial, file_path: Path):
-        """
-        Create comparison plots with reference data.
-        """
-
-        T = np.linspace(nasa7.Tlow, nasa7.Tmax, 256)
-        data = ThermoData.from_ct(species, T)
-        R = data.gas_constant
-
-        fig = plt.figure(num=1, figsize=(7.5, 10))
-        ax1 = plt.subplot(311)
-        plt.plot(T, data.cp / R, "-", color="r", label="Orig.")
-        plt.plot(T, nasa7.cp_over_R(T), "--", color="b", label="Fit")
-        ax1.set_ylabel(r"$cp/R$")
-        plt.legend(loc=4)
-
-        ax2 = plt.subplot(312)
-        plt.plot(T, data.h / (R * T), "-", color="r")
-        plt.plot(T, nasa7.h_over_RT(T), "--", color="b")
-        ax2.set_ylabel(r"$h/RT$")
-
-        ax3 = plt.subplot(313)
-        plt.plot(T, data.s / R, "-", color="r")
-        plt.plot(T, nasa7.s_over_R(T), "--", color="b")
-        ax3.set_ylabel(r"$s/R$")
-        ax3.set_xlabel(r"$T$[K]")
-
-        fig.savefig(file_path, bbox_inches="tight")
-        plt.close()
-
-    @staticmethod
-    def plot_transport_fits(
-        gas: ct.Solution,
-        species: ct.Species,
-        sutherland: Sutherland,
-        polynomial: Polynomial,
-        logpolynomial: Polynomial,
-        file_path: Path,
-    ):
-        """
-        Create comparison plots with reference data.
-        """
-        Tmin = species.thermo.min_temp
-        Tmax = species.thermo.max_temp
-
-        reactants = species.name + ":1.0"
-        n = 128
-        T = np.linspace(Tmin, Tmax, n)
-        mu = np.zeros(n)
-        kappa = np.zeros(n)
-        cv_mole = np.zeros(n)
-        for i, Ti in enumerate(T):
-            gas.TPX = Ti, ct.one_atm, reactants
-            mu[i] = gas.viscosity
-            kappa[i] = gas.thermal_conductivity
-            cv_mole[i] = gas.cv_mole
-
-        W = species.molecular_weight
-        R = ct.gas_constant
-
-        fig = plt.figure(num=2, figsize=(7.5, 10))
-        ax1 = plt.subplot(211)
-        plt.plot(T, mu, "-", color="r", label="Orig.")
-        plt.plot(T, sutherland.mu(T), "--", color="b", label="Sutherland")
-        plt.plot(T, polynomial.mu(T), "--", color="k", label="Polynomial")
-        plt.plot(T, logpolynomial.mu(T), ":", color="g", label="Log-polynomial")
-        ax1.set_ylabel(r"$\mu$")
-        plt.legend(loc=4)
-
-        ax2 = plt.subplot(212)
-        plt.plot(T, kappa, "-", color="r", label="Orig.")
-        plt.plot(
-            T,
-            sutherland.kappa(T, cv_mole, W, R),
-            "--",
-            color="b",
-            label="Sutherland (Euken)",
-        )
-        plt.plot(T, polynomial.kappa(T), "--", color="k", label="Polynomial")
-        plt.plot(T, logpolynomial.kappa(T), ":", color="k", label="Log-polynomial")
-        ax2.set_ylabel(r"$\kappa$")
-        ax2.set_xlabel(r"$T$[K]")
-        plt.legend(loc=4)
-
-        fig.savefig(file_path, bbox_inches="tight")
-        plt.close()
 
     # TODO: this is not used!!!
     def to_foam_dict(self, Tlow, Thigh):
@@ -295,19 +212,20 @@ class SpeciesList:
             # Plot comparison to the reference data
             if plot:
                 print(f"- Saving {spi.name} fit figures under {fig_dir}")
+                T = np.linspace(spi.nasa7.Tlow, spi.nasa7.Tmax, n)
+                # Recreate data to avoid polluting the actual species contstructor
+                # with plotting related actions. Pretty fast anyway.
                 ct_spi = gas.species(gas.species_index(spi.name))
-                spi.plot_nasa7_fit(
-                    species=ct_spi,
-                    nasa7=spi.nasa7,
-                    file_path=Path(fig_dir, f"{spi.name}_thermo.png"),
-                )
-                spi.plot_transport_fits(
-                    gas,
-                    species=ct_spi,
-                    sutherland=spi.sutherland,
-                    polynomial=spi.polynomial,
-                    logpolynomial=spi.log_polynomial,
-                    file_path=Path(fig_dir, f"{spi.name}_transport.png"),
+                ref_data = ThermoData.from_ct(ct_spi, T)
+                file_path=Path(fig_dir, f"{spi.name}_thermo.png")
+                plot_nasa7_fit(ref_data, spi.nasa7, file_path)
+
+                file_path=Path(fig_dir, f"{spi.name}_transport.png")
+                ref_data = TransportData.from_ct(gas, T)
+                plot_transport_fits(
+                    ref_data,
+                    [spi.sutherland, spi.polynomial, spi.log_polynomial],
+                    file_path
                 )
 
         return cls(species_list)
@@ -340,7 +258,7 @@ class SpeciesList:
         writer.write_species_list(species_file, names)
 
         for sp in self.species:
-            if sp.nasa7 is None:
+            if not sp.nasa7:
                 continue
 
             poly_mu = sp.polynomial.coeffs_mu if sp.polynomial else np.zeros(4)
