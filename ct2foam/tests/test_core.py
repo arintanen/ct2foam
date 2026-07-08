@@ -37,6 +37,50 @@ H2O_C_HI = np.array(
 )
 
 
+def _make_h2o2_with_nasa9_h2(tmp_dir: Path) -> Path:
+    """Build a copy of the native Cantera h2o2.yaml mechanism where H2's NASA7
+    thermo entry is replaced by an equivalent NASA9 (multi-range) polynomial.
+
+    return: path to the generated mechanism file.
+    """
+    for data_dir in ct.get_data_directories():
+        candidate = Path(data_dir) / "h2o2.yaml"
+        if candidate.exists():
+            src = candidate
+            break
+    else:
+        raise FileNotFoundError("Could not locate native h2o2.yaml in Cantera data directories.")
+
+    text = src.read_text()
+
+    nasa7_h2_block = (
+        "    model: NASA7\n"
+        "    temperature-ranges: [200.0, 1000.0, 3500.0]\n"
+        "    data:\n"
+        "    - [2.34433112, 7.98052075e-03, -1.9478151e-05, 2.01572094e-08, -7.37611761e-12,\n"
+        "      -917.935173, 0.683010238]\n"
+        "    - [3.3372792, -4.94024731e-05, 4.99456778e-07, -1.79566394e-10, 2.00255376e-14,\n"
+        "      -950.158922, -3.20502331]"
+    )
+    nasa9_h2_block = (
+        "    model: NASA9\n"
+        "    temperature-ranges: [200.0, 1000.0, 6000.0, 2.0e+04]\n"
+        "    data:\n"
+        "    - [2.210371497e+04, -381.846182, 6.08273836, -8.53091441e-03, 1.384646189e-05,\n"
+        "      -9.62579362e-09, 2.519705809e-12, 710.846086, -10.76003744]\n"
+        "    - [5.87712406e+05, -2239.249073, 6.06694922, -6.1396855e-04, 1.491806679e-07,\n"
+        "      -1.923105485e-11, 1.061954386e-15, 1.283210415e+04, -15.86640027]\n"
+        "    - [8.31013916e+08, -6.42073354e+05, 202.0264635, -0.03065092046, 2.486903333e-06,\n"
+        "      -9.70595411e-11, 1.437538881e-15, 4.93870704e+06, -1672.09974]"
+    )
+    if text.count(nasa7_h2_block) != 1:
+        raise AssertionError("Expected NASA7 thermo block for H2 not found in native h2o2.yaml.")
+
+    mech_file = tmp_dir / "h2o2_nasa9.yaml"
+    mech_file.write_text(text.replace(nasa7_h2_block, nasa9_h2_block))
+    return mech_file
+
+
 class TestNASA7PolynomialBasics(unittest.TestCase):
     """Test NASA polynomials and related functionalities."""
 
@@ -264,6 +308,32 @@ class TestNASA7PolynomialCanteraConsistency(unittest.TestCase):
         nasa7 = NASA7Polynomial(c_lo, c_hi, 1000, 200, 3500)
         np.testing.assert_allclose(c_hi, nasa7.coeffs_high, rtol=1e-8)
         np.testing.assert_allclose(c_lo, nasa7.coeffs_low, rtol=1e-8)
+
+    def test_nasa9(self):
+        """A species using a NASA9 (multi-range) polynomial is not NASA7.
+
+        Builds a modified copy of the native h2o2.yaml mechanism where H2's
+        thermo entry is replaced with an equivalent NASA9 polynomial, and
+        checks that NASA7Polynomial.from_ct() detects the mismatched
+        polynomial type and re-fits a valid NASA7 polynomial from it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mech_file = _make_h2o2_with_nasa9_h2(Path(tmpdir))
+            gas = ct.Solution(str(mech_file))
+            h2 = gas.species(gas.species_index("H2"))
+
+            # H2 is no longer represented as a NASA7 (NasaPoly2) polynomial.
+            self.assertNotEqual(type(h2.thermo).__name__, "NasaPoly2")
+            self.assertEqual(type(h2.thermo).__name__, "Nasa9PolyMultiTempRegion")
+
+            # from_ct should still produce a well-fitted NASA7 polynomial
+            # by triggering a full refit against the underlying NASA9 data.
+            nasa7 = NASA7Polynomial.from_ct(h2, 300, 3000, 1000)
+            data = ThermoData.from_ct(h2, np.linspace(300, 3000, 200))
+            quality = nasa7.fit_quality(data)
+            self.assertLess(quality["consistency"]["cp"], 1e-2)
+            self.assertLess(quality["consistency"]["h"], 1e-2)
+            self.assertLess(quality["consistency"]["s"], 1e-2)
 
 
 class TestNASA7PolynomialFitting(unittest.TestCase):
@@ -629,9 +699,8 @@ class TestSpeciesClass(unittest.TestCase):
 
     def setUp(self):
         """Set up Species test data."""
-        test_data_dir = Path(__file__).parent.parent / "test_data"
-        self.mech_file = test_data_dir / "h2o2_mod.yaml"
-        self.gas = ct.Solution(str(self.mech_file))
+        self.mech_file = "h2o2.yaml"
+        self.gas = ct.Solution(self.mech_file)
 
     def test_species_from_ct_creates_fitted_species(self):
         """Test that Species.from_ct creates a fully fitted Species."""
@@ -672,8 +741,7 @@ class TestSpeciesList(unittest.TestCase):
 
     def setUp(self):
         """Set up test mechanism."""
-        test_data_dir = Path(__file__).parent.parent / "test_data"
-        self.mech_file = test_data_dir / "h2o2_mod.yaml"
+        self.mech_file = "h2o2.yaml"
 
     def test_from_ct_mech_loads_mechanism(self):
         """Test that from_ct_mech successfully loads and fits a mechanism."""
@@ -761,8 +829,7 @@ class TestIntegrationEndToEnd(unittest.TestCase):
 
     def test_complete_workflow_h2o2(self):
         """Test complete workflow: load, fit, export."""
-        test_data_dir = Path(__file__).parent.parent / "test_data"
-        mech_file = test_data_dir / "h2o2_mod.yaml"
+        mech_file = "h2o2.yaml"
 
         # Load and fit (happens in constructor)
         species_list = SpeciesList.from_ct_mech(
@@ -784,8 +851,7 @@ class TestIntegrationEndToEnd(unittest.TestCase):
 
     def test_species_to_foam_dict_integration(self):
         """Test Species.to_foam_dict() in context of SpeciesList."""
-        test_data_dir = Path(__file__).parent.parent / "test_data"
-        mech_file = test_data_dir / "h2o2_mod.yaml"
+        mech_file = "h2o2.yaml"
 
         species_list = SpeciesList.from_ct_mech(
             str(mech_file), Tmin=300, Tmax=3000, Tmid=1000, plot=False
