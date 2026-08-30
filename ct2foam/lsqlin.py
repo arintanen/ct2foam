@@ -1,9 +1,10 @@
 """
 A simple library to solve constrained linear least squares problems
-with sparse and dense matrices. Uses cvxopt library for
-optimization
+with sparse and dense matrices. Uses cvxopt library for optimization.
 
-See http://maggotroot.blogspot.ch/2013/11/constrained-linear-least-squares-in.html
+Source: http://maggotroot.blogspot.ch/2013/11/constrained-linear-least-squares-in.html
+Authors: Valeriy Vishnevskiy <valera.vishnevskiy@yandex.ru>, Michael Hirsch
+License: MIT (included in this project under GPLv3 per MIT compatibility)
 """
 
 from __future__ import division

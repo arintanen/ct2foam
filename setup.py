@@ -4,7 +4,7 @@ __title__ = "ct2foam"
 __version__ = "1.0.0"
 __author__ = "Heikki Kahila"
 __license__ = "GPLv3"
-__copyright__ = "Copyright 2021 by Heikki Kahila"
+__copyright__ = "Copyright 2021-2026 by Heikki Kahila"
 
 
 with open("README.md", "r") as fh:
