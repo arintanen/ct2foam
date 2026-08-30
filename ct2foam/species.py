@@ -1,6 +1,6 @@
 """Species class - lightweight container for species metadata and fitted coefficients."""
 
-from typing import Iterator, Optional, Self, Union
+from typing import Iterator, Self, Union
 from pathlib import Path
 
 import numpy as np
@@ -37,11 +37,11 @@ class Species:
         self,
         name: str,
         W: float,
-        elements: dict = {},
-        nasa7: Optional[NASA7Polynomial] = None,
-        sutherland: Optional[Sutherland] = None,
-        polynomial: Optional[Polynomial] = None,
-        log_polynomial: Optional[LogPolynomial] = None,
+        elements: dict,
+        nasa7: NASA7Polynomial,
+        sutherland: Sutherland,
+        polynomial: Polynomial,
+        log_polynomial: LogPolynomial,
     ):
         """
         Initialize Species with metadata.
@@ -56,11 +56,11 @@ class Species:
         """
         self.name = str(name)
         self.W = float(W)
-        self.elements = elements
-        self.nasa7: Optional[NASA7Polynomial] = nasa7
-        self.sutherland: Optional[Sutherland] = sutherland
-        self.polynomial: Optional[Polynomial] = polynomial
-        self.log_polynomial: Optional[LogPolynomial] = log_polynomial
+        self.elements: dict = elements
+        self.nasa7: NASA7Polynomial = nasa7
+        self.sutherland: Sutherland = sutherland
+        self.polynomial: Polynomial = polynomial
+        self.log_polynomial: LogPolynomial = log_polynomial
 
     @classmethod
     def from_ct(

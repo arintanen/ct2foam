@@ -149,6 +149,6 @@ class Mixture:
         """Write thermo transport data into OpenFOAM format."""
         # Create a dummy species list to use common writer function
         from ct2foam.species import Species, SpeciesList
-        species = Species(self.name, W=self.W, elements=None, nasa7=self.nasa7, sutherland=self.sutherland, polynomial=self.polynomial, log_polynomial=self.log_polynomial)
+        species = Species(self.name, W=self.W, elements={}, nasa7=self.nasa7, sutherland=self.sutherland, polynomial=self.polynomial, log_polynomial=self.log_polynomial)
         species_list = SpeciesList(species=[species])
         writer.write_foam(species_list, output_dir)
