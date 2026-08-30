@@ -1,3 +1,14 @@
+"""
+ct2foam CLI entry point.
+
+Converts Cantera thermodynamic and transport data into OpenFOAM-compatible
+thermophysicalProperties dictionaries. Re-fits NASA7 polynomials and
+Sutherland/polynomial transport functions where needed, and evaluates
+fit quality against Cantera reference data. A single common mid-point
+temperature (Tmid) is enforced across all species, as OpenFOAM requires
+all species to share the same NASA7 transition temperature.
+Run via ``ct2foam --help`` or ``python -m ct2foam``.
+"""
 import argparse
 from datetime import date
 from pathlib import Path
@@ -6,10 +17,8 @@ from pathlib import Path
 from ct2foam.species import SpeciesList
 from ct2foam.mixture import Mixture
 
-# TODO: Mention that the idea is to fit with common temperature which is OF requirement
-# TODO: Add README examples
-# LICENSE + docstrings - CHECK lsqlin MIT licence - is it contaminating this to MIT as well?
-# Go through the original TODO.md
+# TODO: LICENSE + docstrings - CHECK lsqlin MIT licence - is it contaminating this to MIT as well?
+# TODO: Go through the original TODO.md
 def main():
     parser = argparse.ArgumentParser(
         description=(
