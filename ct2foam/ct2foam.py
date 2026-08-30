@@ -6,7 +6,6 @@ from pathlib import Path
 from ct2foam.species import SpeciesList
 from ct2foam.mixture import Mixture
 
-# TODO: go through TODOS
 # TODO: Mention that the idea is to fit with common temperature which is OF requirement
 # TODO: Add README examples
 # LICENSE + docstrings - CHECK lsqlin MIT licence - is it contaminating this to MIT as well?

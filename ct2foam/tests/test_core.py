@@ -713,28 +713,6 @@ class TestSpeciesClass(unittest.TestCase):
         self.assertIsNotNone(sp.polynomial)
         self.assertIsNotNone(sp.log_polynomial)
 
-    def test_to_foam_dict_requires_nasa7(self):
-        """Test that to_foam_dict raises error without nasa7."""
-        sp = Species(name="TEST", W=28.0, elements={"N": 2})
-        with self.assertRaises(RuntimeError):
-            sp.to_foam_dict(Tlow=300, Thigh=3000)
-
-    def test_to_foam_dict_with_fitted_species(self):
-        """Test that to_foam_dict works with fitted Species."""
-        sp = Species.from_ct(self.gas, "H2", Tmin=300, Tmax=3000, Tmid=1000)
-
-        # Export with Tlow/Thigh
-        foam_dict = sp.to_foam_dict(Tlow=300, Thigh=3000)
-
-        self.assertEqual(foam_dict["name"], "H2")
-        self.assertEqual(foam_dict["Tmid"], 1000)
-        self.assertEqual(foam_dict["Tlow"], 300)
-        self.assertEqual(foam_dict["Thigh"], 3000)
-        self.assertIn("nasa7_lo", foam_dict)
-        self.assertIn("nasa7_hi", foam_dict)
-        self.assertIn("As", foam_dict)
-        self.assertIn("Ts", foam_dict)
-
 
 class TestSpeciesList(unittest.TestCase):
     """Test SpeciesList functionality."""

@@ -17,20 +17,19 @@ from matplotlib import pyplot as plt
 
 @dataclass
 class TransportData:
-    # TODO: check units and remove unnecessary ones
     # Universal gas constant [J/kmol/K]
     gas_constant: float
     # Temperature [K]
     temperature: npt.NDArray[np.floating]
     # Molar heat capacity [J/kmol/K]
     cp: npt.NDArray[np.floating]
-    # Viscosity []
+    # Viscosity [Pa s]
     mu: npt.NDArray[np.floating]
-    # Conductivity []
+    # Conductivity [W/m/K]
     k: npt.NDArray[np.floating]
-    # Specific heat in constant volume []
+    # Specific heat in constant volume [J/kmol/K]
     cv: npt.NDArray[np.floating]
-    # Mean molecular weight []
+    # Mean molecular weight [kg/kmol]
     W: float
 
     @classmethod
@@ -103,11 +102,9 @@ class TransportFunction:
 
 class Sutherland(TransportFunction):
     """Sutherland viscosity model with Euken thermal conductivity."""
-    # TODO: is std_error needed?
-    def __init__(self, As, Ts, std_err=None):
+    def __init__(self, As, Ts):
         self.As = float(As)
         self.Ts = float(Ts)
-        self.std_err = std_err if std_err is None else np.asarray(std_err, dtype=float)
         self.name = "sutherland"
 
     @classmethod
@@ -137,7 +134,7 @@ class Sutherland(TransportFunction):
             p0: Initial guess [As, Ts] (default: [1.0, 1.0])
 
         Returns:
-            Sutherland instance with std_err attribute set
+            Sutherland instance
         """
         if p0 is None:
             p0 = np.array([1.0, 1.0])
@@ -145,9 +142,10 @@ class Sutherland(TransportFunction):
         popt, pcov = curve_fit(cls.sutherland_func, T, mu, p0=p0)
         As = popt[0]
         Ts = popt[1]
-        std_err = np.sqrt(np.diag(pcov))
-
-        return cls(As, Ts, std_err=std_err)
+        # For debugging
+        # std_err = np.sqrt(np.diag(pcov))
+        # print(f"Sutherland std_err={std_err}")
+        return cls(As, Ts)
 
     def mu(self, T: Union[float, np.ndarray]):
         """

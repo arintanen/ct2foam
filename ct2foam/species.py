@@ -7,7 +7,6 @@ from typing import Self
 import numpy as np
 import cantera as ct
 
-# TODO: fix paths eventually
 from .nasa7 import NASA7Polynomial
 from .nasa7 import ThermoData
 from .nasa7 import plot_nasa7_fit
@@ -100,10 +99,7 @@ class Species:
         max_err = max(err_cp, err_h, err_s)
 
         if max_c0 > tol_nasa7_c0 or max_err > tol_nasa7:
-            # TODO: test figure path
-            # Save plot to tmp
             import tempfile
-
             fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
             cls.plot_nasa7_fit(species, nasa7, fig_path)
             raise ValueError(
@@ -139,54 +135,6 @@ class Species:
             polynomial=polynomial,
             log_polynomial=log_polynomial,
         )
-
-
-    # TODO: this is not used!!!
-    def to_foam_dict(self, Tlow, Thigh):
-        """Convert fitted data to an OpenFOAM-compatible dict.
-
-        Args:
-            Tlow: Lower temperature bound of mechanism validity range
-            Thigh: Upper temperature bound of mechanism validity range
-
-        Returns:
-            Dictionary with OpenFOAM format data
-
-        Raises:
-            RuntimeError: If NASA7 coefficients not set
-        """
-        if self.nasa7 is None:
-            raise RuntimeError(
-                f"Species {self.name}: NASA7 coefficients not set. "
-                "Fitting must be performed before export."
-            )
-
-        result = {
-            "name": self.name,
-            "W": self.W,
-            "Tmid": self.nasa7.Tmid,
-            "Tlow": Tlow,
-            "Thigh": Thigh,
-            "nasa7_lo": self.nasa7.coeffs_low.tolist(),
-            "nasa7_hi": self.nasa7.coeffs_high.tolist(),
-        }
-
-        if self.sutherland is not None:
-            result["As"] = self.sutherland.As
-            result["Ts"] = self.sutherland.Ts
-
-        if self.polynomial is not None:
-            result["poly_mu"] = self.polynomial.coeffs_mu.tolist()
-            result["poly_kappa"] = self.polynomial.coeffs_kappa.tolist()
-
-        if self.log_polynomial is not None:
-            result["logpoly_mu"] = self.log_polynomial.coeffs_mu.tolist()
-            result["logpoly_kappa"] = self.log_polynomial.coeffs_kappa.tolist()
-
-        if self.elements:
-            result["elements"] = self.elements
-
-        return result
 
 
 class SpeciesList:

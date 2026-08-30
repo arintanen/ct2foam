@@ -2,15 +2,12 @@
 Mixture class - lightweight container for a mixture compunding from multiple species.
 """
 
-from typing import List
 from pathlib import Path
 from typing import Self
 
-from matplotlib import pyplot as plt
 import numpy as np
 import cantera as ct
 
-# TODO: fix paths eventually
 from .nasa7 import NASA7Polynomial
 from .nasa7 import ThermoData
 from .nasa7 import plot_nasa7_fit
