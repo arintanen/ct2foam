@@ -97,16 +97,16 @@ def write_thermo_transport(
         output.write("\t\tTlow\t\t" + str(nasa7_Tlo) + ";\n")
         output.write("\t\tThigh\t\t" + str(nasa7_Thi) + ";\n")
         output.write("\t\tTcommon\t\t" + str(nasa7_Tmid) + ";\n")
-        output.write("\t\tlowCpCoeffs\t(\t")
+        output.write("\t\tlowCpCoeffs\t( ")
         for wi in range(0, 7):  # NASA pol has 7 coeffs
             output.write(str(nasa7_lo[wi]))
             output.write(" ")
-        output.write(" );\n")
-        output.write("\t\thighCpCoeffs\t(\t")
+        output.write(");\n")
+        output.write("\t\thighCpCoeffs\t( ")
         for wi in range(0, 7):  # NASA pol has 7 coeffs
             output.write(str(nasa7_hi[wi]))
             output.write(" ")
-        output.write(" );\n")
+        output.write(");\n")
         output.write("\t}\n\n")
 
         #############################################################################
@@ -116,40 +116,40 @@ def write_thermo_transport(
         output.write("\t\tAs\t" + str(As) + ";\n")
         output.write("\t\tTs\t" + str(Ts) + ";\n")
 
-        output.write("\t\tmuLogCoeffs<8>\t(\t")
+        output.write("\t\tmuLogCoeffs<8>\t( ")
         for wi in range(8):
             if wi < len(logpoly_mu_rev):
                 output.write(str(logpoly_mu_rev[wi]))
             else:
                 output.write("0")
             output.write(" ")
-        output.write(" );\n")
+        output.write(");\n")
 
-        output.write("\t\tmuCoeffs<8>\t(\t")
+        output.write("\t\tmuCoeffs<8>\t( ")
         for wi in range(8):
             if wi < len(poly_mu_rev):
                 output.write(str(poly_mu_rev[wi]))
             else:
                 output.write("0")
             output.write(" ")
-        output.write(" );\n")
+        output.write(");\n")
         #############################################################################
-        output.write("\t\tkappaLogCoeffs<8>\t(\t")
+        output.write("\t\tkappaLogCoeffs<8>\t( ")
         for wi in range(8):
             if wi < len(logpoly_kappa_rev):
                 output.write(str(logpoly_kappa_rev[wi]))
             else:
                 output.write("0")
             output.write(" ")
-        output.write(" );\n")
-        output.write("\t\tkappaCoeffs<8>\t(\t")
+        output.write(");\n")
+        output.write("\t\tkappaCoeffs<8>\t( ")
         for wi in range(8):
             if wi < len(poly_kappa_rev):
                 output.write(str(poly_kappa_rev[wi]))
             else:
                 output.write("0")
             output.write(" ")
-        output.write(" );\n")
+        output.write(");\n")
         output.write("\t}\n\n")
         #############################################################################
 
