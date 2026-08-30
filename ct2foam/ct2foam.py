@@ -59,7 +59,7 @@ def main():
     )
     parser.add_argument(
         "-n",
-        "--mixture_name",
+        "--mixture-name",
         type=str,
         help='(Optional) Mixture name, e.g. "air".',
         required=False,

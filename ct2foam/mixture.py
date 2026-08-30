@@ -107,7 +107,7 @@ class Mixture:
             )
 
         for tfi in [sutherland, polynomial, log_polynomial]:
-            err = tfi.evaluate_transport_fit_quality(ref_data)
+            err = tfi.evaluate_transport_fit_quality(ref_data_transport)
             if err["mu"] > tol_transport or err["kappa"] > tol_transport:
                 import tempfile
                 fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
