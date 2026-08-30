@@ -201,7 +201,21 @@ int main(int argc, char *argv[])
 
     Info<< "dcp = " << mag(ts_py.Cp(p, T)-ts3.Cp(p, T))/ts3.Cp(p, T) << endl;
     Info<< "dCp = " << mag(ts_py.Cp(p, T)-ts3.Cp(p, T))/ts3.Cp(p, T) << endl;
-    
+
+    // --- Synthetic NASA polynomial block (read from thermoDict_synth) ---
+    dictionary dict_syn(IFstream("thermoDict_synth")());
+    Info << "\nSYN from python" << endl;    
+    sutherlandJanafTransport ts_syn("SYN", dict_syn.subDict("SYN"));
+    Info<< "R = " << ts_syn.R() << endl;
+    Info<< "cp = " << ts_syn.Cp(p, T) << endl;
+    Info<< "Cp = " << ts_syn.Cp(p, T) << endl;
+    Info<< "cv = " << ts_syn.Cv(p, T) << endl;
+    Info<< "Cv = " << ts_syn.Cv(p, T) << endl;
+    Info<< "mu = " << ts_syn.mu(p, T) << endl;
+    Info<< "kappa = " << ts_syn.kappa(p, T) << endl;
+    Info<< "h = " << ts_syn.ha(p, T) << endl;
+    Info<< "s = " << ts_syn.s(p, T) << endl;
+
     Info<< "\nEnd\n" << endl;
 
 

@@ -1,0 +1,28 @@
+SYN
+{
+	specie
+	{
+		nMoles 	 1;
+		molWeight 	2.016;
+	}
+
+	thermodynamics
+	{
+		Tlow		200;
+		Thigh		3000;
+		Tcommon		1000;
+		lowCpCoeffs	( 1 1e-5 0 0 0 0 0 );
+		highCpCoeffs	( 1 1e-5 0 0 0 0 0 );
+	}
+
+	transport 
+	{
+		As	1e-6;
+		Ts	10;
+		muLogCoeffs<8>	( 0 0 0 0 0 0 0 0 );
+		muCoeffs<8>	( 0 0 0 0 0 0 0 0 );
+		kappaLogCoeffs<8>	( 0 0 0 0 0 0 0 0 );
+		kappaCoeffs<8>	( 0 0 0 0 0 0 0 0 );
+	}
+
+}
