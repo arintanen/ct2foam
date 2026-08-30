@@ -147,59 +147,11 @@ class Mixture:
             log_polynomial=log_polynomial,
         )
 
-    # TODO: clean this up after everything else is done.
-    # And clean as this is a dupplicate
-    # Species not needed to be written but we oculd write for consistency. Now it writes each string character separately. Mayble listify
+
     def write_foam(self, output_dir):
-        """Write OpenFOAM output files using foam_writer.
-
-        Args:
-            output_dir: Directory to write output files
-
-        Raises:
-            RuntimeError: If fitting has not been performed yet
-        """
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        thermo_file = output_dir / "thermo.foam"
-        reactions_file = output_dir / "reactions.foam"
-        species_file = output_dir / "species.foam"
-
-        # Remove existing files
-        thermo_file.unlink(missing_ok=True)
-        reactions_file.unlink(missing_ok=True)
-        species_file.unlink(missing_ok=True)
-
-        writer.write_reactions(reactions_file)
-
-        writer.write_species_list(species_file, self.name)
-
-        poly_mu = self.polynomial.coeffs_mu if self.polynomial else np.zeros(4)
-        poly_kappa = self.polynomial.coeffs_kappa if self.polynomial else np.zeros(4)
-        logpoly_mu = (
-            self.log_polynomial.coeffs_mu if self.log_polynomial else np.zeros(4)
-        )
-        logpoly_kappa = (
-            self.log_polynomial.coeffs_kappa if self.log_polynomial else np.zeros(4)
-        )
-        As = self.sutherland.As if self.sutherland else 0.0
-        Ts = self.sutherland.Ts if self.sutherland else 0.0
-
-        writer.write_thermo_transport(
-            thermo_file,
-            self.name,
-            self.W,
-            As,
-            Ts,
-            poly_mu,
-            poly_kappa,
-            logpoly_mu,
-            logpoly_kappa,
-            self.nasa7.Tmid,
-            self.nasa7.Tlow,
-            self.nasa7.Tmax,
-            self.nasa7.coeffs_low,
-            self.nasa7.coeffs_high,
-            elements=None,
-        )
+        """Write thermo transport data into OpenFOAM format."""
+        # Create a dummy species list to use common writer function
+        from ct2foam.species import Species, SpeciesList
+        species = Species(self.name, W=self.W, elements=None, nasa7=self.nasa7, sutherland=self.sutherland, polynomial=self.polynomial, log_polynomial=self.log_polynomial)
+        species_list = SpeciesList(species=[species])
+        writer.write_foam(species_list, output_dir)

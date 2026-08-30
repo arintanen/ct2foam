@@ -200,6 +200,36 @@ class SpeciesList:
     def __init__(self, species: List[Species] = []):
         self.species = species
 
+    # Make SpeciesList behave like a Python sequence/iterable
+    def __iter__(self):
+        """Return iterator over contained Species objects."""
+        return iter(self.species)
+
+    def __len__(self):
+        """Return number of Species in the list."""
+        return len(self.species)
+
+    def __getitem__(self, idx):
+        """Indexing access, e.g. species_list[0]."""
+        return self.species[idx]
+
+    def __contains__(self, item):
+        """Membership test. Accepts Species instance or species.name strings."""
+        if isinstance(item, str):
+            return any(sp.name == item for sp in self.species)
+        return item in self.species
+
+    def append(self, item):
+        """Append a Species to the list."""
+        self.species.append(item)
+
+    def extend(self, items):
+        """Extend list with multiple Species."""
+        self.species.extend(items)
+
+    def __repr__(self):
+        return f"SpeciesList({self.species!r})"
+
     @classmethod
     def from_ct_mech(
         cls,
@@ -248,62 +278,6 @@ class SpeciesList:
 
         return cls(species_list)
 
-    # TODO: clean this up after everything else is done.
     def write_foam(self, output_dir):
-        """Write OpenFOAM output files using foam_writer.
-
-        Args:
-            output_dir: Directory to write output files
-
-        Raises:
-            RuntimeError: If fitting has not been performed yet
-        """
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        thermo_file = output_dir / "thermo.foam"
-        reactions_file = output_dir / "reactions.foam"
-        species_file = output_dir / "species.foam"
-
-        # Remove existing files
-        thermo_file.unlink(missing_ok=True)
-        reactions_file.unlink(missing_ok=True)
-        species_file.unlink(missing_ok=True)
-
-        writer.write_reactions(reactions_file)
-
-        names = [sp.name for sp in self.species if sp.nasa7 is not None]
-        writer.write_species_list(species_file, names)
-
-        for sp in self.species:
-            if not sp.nasa7:
-                continue
-
-            poly_mu = sp.polynomial.coeffs_mu if sp.polynomial else np.zeros(4)
-            poly_kappa = sp.polynomial.coeffs_kappa if sp.polynomial else np.zeros(4)
-            logpoly_mu = (
-                sp.log_polynomial.coeffs_mu if sp.log_polynomial else np.zeros(4)
-            )
-            logpoly_kappa = (
-                sp.log_polynomial.coeffs_kappa if sp.log_polynomial else np.zeros(4)
-            )
-            As = sp.sutherland.As if sp.sutherland else 0.0
-            Ts = sp.sutherland.Ts if sp.sutherland else 0.0
-
-            writer.write_thermo_transport(
-                thermo_file,
-                sp.name,
-                sp.W,
-                As,
-                Ts,
-                poly_mu,
-                poly_kappa,
-                logpoly_mu,
-                logpoly_kappa,
-                sp.nasa7.Tmid,
-                sp.nasa7.Tlow,
-                sp.nasa7.Tmax,
-                sp.nasa7.coeffs_low,
-                sp.nasa7.coeffs_high,
-                elements=sp.elements,
-            )
+        """Write thermo transport data into OpenFOAM format."""
+        writer.write_foam(self, output_dir)

@@ -1,4 +1,9 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+from pathlib import Path
 import numpy as np
+if TYPE_CHECKING:
+    from ct2foam.species import SpeciesList
 
 
 def write_species_list(file_name, species_names):
@@ -151,3 +156,63 @@ def write_thermo_transport(
             output.write("\t}\n")
             #############################################################################
         output.write("}\n\n")
+
+
+def write_foam(species: "SpeciesList", output_dir: Path):
+    """Write OpenFOAM output files using foam_writer.
+
+    Args:
+        output_dir: Directory to write output files
+
+    Raises:
+        RuntimeError: If fitting has not been performed yet
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    thermo_file = output_dir / "thermo.foam"
+    reactions_file = output_dir / "reactions.foam"
+    species_file = output_dir / "species.foam"
+
+    # Remove existing files
+    thermo_file.unlink(missing_ok=True)
+    reactions_file.unlink(missing_ok=True)
+    species_file.unlink(missing_ok=True)
+
+    write_reactions(reactions_file)
+
+    names = [sp.name for sp in species if sp.nasa7 is not None]
+    write_species_list(species_file, names)
+
+    for sp in species:
+        if not sp.nasa7:
+            continue
+
+        poly_mu = sp.polynomial.coeffs_mu if sp.polynomial else np.zeros(4)
+        poly_kappa = sp.polynomial.coeffs_kappa if sp.polynomial else np.zeros(4)
+        logpoly_mu = (
+            sp.log_polynomial.coeffs_mu if sp.log_polynomial else np.zeros(4)
+        )
+        logpoly_kappa = (
+            sp.log_polynomial.coeffs_kappa if sp.log_polynomial else np.zeros(4)
+        )
+        As = sp.sutherland.As if sp.sutherland else 0.0
+        Ts = sp.sutherland.Ts if sp.sutherland else 0.0
+
+        write_thermo_transport(
+            thermo_file,
+            sp.name,
+            sp.W,
+            As,
+            Ts,
+            poly_mu,
+            poly_kappa,
+            logpoly_mu,
+            logpoly_kappa,
+            sp.nasa7.Tmid,
+            sp.nasa7.Tlow,
+            sp.nasa7.Tmax,
+            sp.nasa7.coeffs_low,
+            sp.nasa7.coeffs_high,
+            elements=sp.elements,
+        )
