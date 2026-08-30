@@ -26,10 +26,10 @@ setuptools.setup(
         "License :: OSI Approved :: GPL License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.11",
     install_requires=[
         "cvxopt>=1.2.0",
-        "numpy>=1.19.2",
+        "numpy>=1.20",
         "scipy>=1.5.2",
         "matplotlib>=3.3",
     ],

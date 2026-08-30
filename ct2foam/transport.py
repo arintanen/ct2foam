@@ -1,18 +1,11 @@
-from typing import Union, Self, List
+from typing import Self, Optional
 from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.optimize import curve_fit
 import cantera as ct
-
-from typing import Self
-from dataclasses import dataclass
-
-import numpy as np
-import cantera as ct
-
 from numpy import typing as npt
-
 from matplotlib import pyplot as plt
 
 @dataclass
@@ -68,15 +61,15 @@ class TransportFunction:
 
     name: str = "transport_function"
 
-    def mu(self, T: Union[float, np.ndarray]):
+    def mu(self, T: np.ndarray) -> np.ndarray:
         """Evaluate viscosity. Must be implemented by subclasses."""
         raise NotImplementedError
 
-    def kappa(self, T: Union[float, np.ndarray], *args, **kwargs):
+    def kappa(self, T: np.ndarray, *args, **kwargs) -> np.ndarray:
         """Evaluate thermal conductivity. Must be implemented by subclasses."""
         raise NotImplementedError
 
-    def _kappa_from_data(self, T: Union[float, np.ndarray], reference_data: TransportData):
+    def _kappa_from_data(self, T: np.ndarray, reference_data: TransportData):
         """
         Evaluate kappa(T) using a TransportData reference for any auxiliary
         arguments. Default just forwards to kappa(T); Sutherland overrides
@@ -102,7 +95,7 @@ class TransportFunction:
 
 class Sutherland(TransportFunction):
     """Sutherland viscosity model with Euken thermal conductivity."""
-    def __init__(self, As, Ts):
+    def __init__(self, As: float, Ts: float):
         self.As = float(As)
         self.Ts = float(Ts)
         self.name = "sutherland"
@@ -120,21 +113,18 @@ class Sutherland(TransportFunction):
         return cls.fit(data.temperature, data.mu)
 
     @staticmethod
-    def sutherland_func(T: Union[float, np.ndarray], As, Ts):
+    def sutherland_func(T: np.ndarray, As: float, Ts: float) -> np.ndarray:
         """Sutherland viscosity formula [Pas]."""
         return As * np.sqrt(T) / (1.0 + Ts / T)
 
     @classmethod
-    def fit(cls, T: Union[float, np.ndarray], mu, p0=None):
+    def fit(cls, T: np.ndarray, mu: np.ndarray, p0: Optional[np.ndarray] = None) -> Self:
         """Fit Sutherland parameters from viscosity data.
 
         Args:
-            T: Temperature array
-            mu: Viscosity data
-            p0: Initial guess [As, Ts] (default: [1.0, 1.0])
-
-        Returns:
-            Sutherland instance
+            T: sample temperatures in Kelvin
+            mu: reference viscosity values [Pas]
+            p0: initial guess [As, Ts] (default: [1.0, 1.0])
         """
         if p0 is None:
             p0 = np.array([1.0, 1.0])
@@ -147,21 +137,21 @@ class Sutherland(TransportFunction):
         # print(f"Sutherland std_err={std_err}")
         return cls(As, Ts)
 
-    def mu(self, T: Union[float, np.ndarray]):
+    def mu(self, T: np.ndarray) -> np.ndarray:
         """
         Evaluate viscosity based on Sutherland formulation. Note, that
         while the original formulation is mu = mu0*(T0+C)/(T+C)*(T/T0)^(3/2),
         here a simplified version is used (as in OpenFOAM):
-        mu = As*sqrt(T)/(1.0 + Ts/T);
-        Return: viscosity [Pas]
+        mu = As*sqrt(T)/(1.0 + Ts/T)
+        Returns viscosity [Pas].
         """
         return self.sutherland_func(T, self.As, self.Ts)
 
-    def kappa(self, T: Union[float, np.ndarray], cv_mole, W, R):
+    def kappa(self, T: np.ndarray, cv_mole: np.ndarray, W: float, R: float) -> np.ndarray:
         """
         Evaluate Euken thermal conductivity based on OpenFOAM formulation:
         mu * Cv * (1.32 + 1.77*R_specific/Cv).
-        Return: conductivity [W/mK]
+        Returns conductivity [W/mK].
         """
         mu_val = self.mu(T)
         Cv = cv_mole / W
@@ -178,7 +168,7 @@ class Sutherland(TransportFunction):
 class Polynomial(TransportFunction):
     """Standard or log-polynomial transport fit."""
 
-    def __init__(self, coeffs_mu, coeffs_kappa, poly_type="polynomial"):
+    def __init__(self, coeffs_mu: np.ndarray, coeffs_kappa: np.ndarray, poly_type: str = "polynomial"):
         self.coeffs_mu = np.asarray(coeffs_mu, dtype=float)
         self.coeffs_kappa = np.asarray(coeffs_kappa, dtype=float)
         self.name = "polynomial"
@@ -196,17 +186,14 @@ class Polynomial(TransportFunction):
         return cls.fit_polynomial(data.temperature, data.mu, data.k)
 
     @classmethod
-    def fit_polynomial(cls, T, mu, kappa, poly_order=3):
+    def fit_polynomial(cls, T: np.ndarray, mu: np.ndarray, kappa: np.ndarray, poly_order: int = 3) -> Self:
         """Fit standard polynomial transport coefficients.
 
         Args:
-            T: Temperature array
-            mu: Viscosity data
-            kappa: Thermal conductivity data
-            poly_order: Polynomial order (default 3)
-
-        Returns:
-            Polynomial instance with poly_type='polynomial'
+            T: sample temperatures in Kelvin
+            mu: reference viscosity values [Pas]
+            kappa: reference thermal conductivity values [W/mK]
+            poly_order: polynomial order
         """
         mu = np.asarray(mu, dtype=float)
         kappa = np.asarray(kappa, dtype=float)
@@ -214,13 +201,13 @@ class Polynomial(TransportFunction):
         poly_coeffs_kappa = np.polyfit(T, kappa, poly_order)
         return cls(poly_coeffs_mu, poly_coeffs_kappa, poly_type="polynomial")
 
-    def mu(self, T):
+    def mu(self, T: np.ndarray) -> np.ndarray:
         """Evaluate viscosity from polynomial coefficients."""
         T = np.asarray(T, dtype=float)
         f = np.poly1d(self.coeffs_mu)
         return f(T)
 
-    def kappa(self, T):
+    def kappa(self, T: np.ndarray) -> np.ndarray:
         """Evaluate thermal conductivity from polynomial coefficients."""
         T = np.asarray(T, dtype=float)
         f = np.poly1d(self.coeffs_kappa)
@@ -230,7 +217,7 @@ class Polynomial(TransportFunction):
 class LogPolynomial(TransportFunction):
     """Log-polynomial transport fit."""
 
-    def __init__(self, coeffs_mu, coeffs_kappa):
+    def __init__(self, coeffs_mu: np.ndarray, coeffs_kappa: np.ndarray):
         self.coeffs_mu = np.asarray(coeffs_mu, dtype=float)
         self.coeffs_kappa = np.asarray(coeffs_kappa, dtype=float)
         self.name = "log-polynomial"
@@ -249,17 +236,14 @@ class LogPolynomial(TransportFunction):
         return cls.fit_log_polynomial(data.temperature, data.mu, data.k)
 
     @classmethod
-    def fit_log_polynomial(cls, T, mu, kappa, poly_order=3):
+    def fit_log_polynomial(cls, T: np.ndarray, mu: np.ndarray, kappa: np.ndarray, poly_order: int = 3) -> Self:
         """Fit log-polynomial transport coefficients.
 
         Args:
-            T: Temperature array
-            mu: Viscosity data
-            kappa: Thermal conductivity data
-            poly_order: Polynomial order (default 3 from CHEMKIN)
-
-        Returns:
-            Polynomial instance with poly_type='log_polynomial'
+            T: sample temperatures in Kelvin
+            mu: reference viscosity values [Pas]
+            kappa: reference thermal conductivity values [W/mK]
+            poly_order: polynomial order (CHEMKIN default: 3)
         """
         mu = np.asarray(mu, dtype=float)
         kappa = np.asarray(kappa, dtype=float)
@@ -270,13 +254,13 @@ class LogPolynomial(TransportFunction):
         poly_coeffs_kappa = np.polyfit(T_log, kappa_log, poly_order)
         return cls(poly_coeffs_mu, poly_coeffs_kappa)
 
-    def mu(self, T):
+    def mu(self, T: np.ndarray) -> np.ndarray:
         """Evaluate viscosity from log-polynomial coefficients."""
         T = np.asarray(T, dtype=float)
         f = np.poly1d(self.coeffs_mu)
         return np.exp(f(np.log(T)))
 
-    def kappa(self, T):
+    def kappa(self, T: np.ndarray) -> np.ndarray:
         """Evaluate thermal conductivity from log-polynomial coefficients."""
         T = np.asarray(T, dtype=float)
         f = np.poly1d(self.coeffs_kappa)
@@ -285,7 +269,7 @@ class LogPolynomial(TransportFunction):
 
 def plot_transport_fits(
     data: TransportData,
-    fits: List[TransportFunction],
+    fits: list[TransportFunction],
     file_path: Path,
 ):
     """

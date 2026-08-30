@@ -112,7 +112,7 @@ class ThermoData:
 class NASA7Polynomial:
     """Encapsulates NASA7 polynomial coefficients and evaluation methods."""
 
-    def __init__(self, coeffs_low, coeffs_high, Tmid, Tmin, Tmax):
+    def __init__(self, coeffs_low: np.ndarray, coeffs_high: np.ndarray, Tmid: float, Tmin: float, Tmax: float):
         self.coeffs_low = np.asarray(coeffs_low, dtype=float)
         self.coeffs_high = np.asarray(coeffs_high, dtype=float)
         self.Tmid = Tmid
@@ -210,7 +210,7 @@ class NASA7Polynomial:
         Construct from Cantera Solution object
         """
 
-        print(f"\nGenerating NASA7 polynomial for mixture")
+        print("\nGenerating NASA7 polynomial for mixture")
 
         _n = int(n / 2)
         _Tl = np.linspace(Tmin, Tmid, _n, endpoint=False)
@@ -261,7 +261,7 @@ class NASA7Polynomial:
 
     # -- public full-range evaluators --
 
-    def cp_over_R(self, T):
+    def cp_over_R(self, T: np.ndarray) -> np.ndarray:
         """Evaluate cp/R over the full temperature range."""
         T = np.atleast_1d(np.asarray(T, dtype=float))
         result = np.zeros_like(T)
@@ -271,7 +271,7 @@ class NASA7Polynomial:
         result[hi] = self._cp(self.coeffs_high, T[hi])
         return result
 
-    def h_over_RT(self, T):
+    def h_over_RT(self, T: np.ndarray) -> np.ndarray:
         """Evaluate h/(RT) over the full temperature range."""
         T = np.atleast_1d(np.asarray(T, dtype=float))
         result = np.zeros_like(T)
@@ -281,7 +281,7 @@ class NASA7Polynomial:
         result[hi] = self._h(self.coeffs_high, T[hi])
         return result
 
-    def s_over_R(self, T):
+    def s_over_R(self, T: np.ndarray) -> np.ndarray:
         """Evaluate s/R over the full temperature range."""
         T = np.atleast_1d(np.asarray(T, dtype=float))
         result = np.zeros_like(T)
@@ -291,7 +291,7 @@ class NASA7Polynomial:
         result[hi] = self._s(self.coeffs_high, T[hi])
         return result
 
-    def dcpdT_over_R(self, T):
+    def dcpdT_over_R(self, T: np.ndarray) -> np.ndarray:
         """Evaluate (1/R) * dcp/dT over the full temperature range."""
         T = np.atleast_1d(np.asarray(T, dtype=float))
         result = np.zeros_like(T)
@@ -302,7 +302,7 @@ class NASA7Polynomial:
         return result
 
     @classmethod
-    def fit_cp_only(cls, data: ThermoData, Tmin, Tmax, Tcommon):
+    def fit_cp_only(cls, data: ThermoData, Tmin: float, Tmax: float, Tcommon: float) -> Self:
         """
         Fit NASA7 coefficients using specific heat (cp/R) data only and obtain
         the additional coefficients for entropy (s) and enthalpy (h) by analytical
@@ -328,9 +328,6 @@ class NASA7Polynomial:
         Notes:
         - Note that multiplying with a fraction prior to the exponent
         ((1./2.)**(1./3.)*T)**3 ensures higher numerical arithmetic accuracy
-
-        Returns:
-            NASA7Polynomial instance
         """
         T = data.temperature
         # Find index closest to Tmid
@@ -414,7 +411,7 @@ class NASA7Polynomial:
         return cls(coeffs_corrected[:7], coeffs_corrected[7:], Tcommon, Tmin, Tmax)
 
     @classmethod
-    def fit_full(cls, data: ThermoData, Tmin, Tmax, Tcommon):
+    def fit_full(cls, data: ThermoData, Tmin: float, Tmax: float, Tcommon: float) -> Self:
         """Fit NASA7 coefficients using cp, h, and s data simultaneously by considering
         the whole system with prescribed constraints. Ideal for experimental data or
         for refitting low-quality numerical data.
@@ -431,9 +428,6 @@ class NASA7Polynomial:
         Notes:
         - Note that multiplying with a fraction prior to the exponent
         ((1./2.)**(1./3.)*T)**3 ensures higher numerical arithmetic accuracy
-
-        Returns:
-            NASA7Polynomial instance
         """
         R = data.gas_constant
         T = data.temperature
@@ -672,7 +666,7 @@ class NASA7Polynomial:
 
         return coeffs
 
-    def fit_quality(self, data: ThermoData):
+    def fit_quality(self, data: ThermoData) -> dict:
         """Check L2 error of coefficients against reference data."""
 
         # C0 / C1 continuity
@@ -695,7 +689,7 @@ class NASA7Polynomial:
         self.quality = quality
         return quality
 
-    def c0_continuity(self, func: Callable):
+    def c0_continuity(self, func: Callable) -> float:
         """
         Evaluate C0 continuity for a given function
         """
@@ -712,7 +706,7 @@ class NASA7Polynomial:
         quality = {"cp": cp_c0, "dcpdT": dcpdT_c0, "h": h_c0, "s": s_c0}
         return quality
 
-    def is_c0_continuous(self, tol=1e-6) -> bool:
+    def is_c0_continuous(self, tol: float = 1e-6) -> bool:
         quality = self.continuity_error()
         return max(quality["cp"], quality["dcpdT"], quality["h"], quality["s"]) < tol
 

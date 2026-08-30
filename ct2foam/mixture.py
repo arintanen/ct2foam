@@ -3,7 +3,7 @@ Mixture class - lightweight container for a mixture compunding from multiple spe
 """
 
 from pathlib import Path
-from typing import Self
+from typing import Optional, Self
 
 import numpy as np
 import cantera as ct
@@ -30,13 +30,13 @@ class Mixture:
 
     def __init__(
         self,
-        name,
-        X,
-        W,
-        nasa7=None,
-        sutherland=None,
-        polynomial=None,
-        log_polynomial=None,
+        name: str,
+        X: dict,
+        W: float,
+        nasa7: Optional[NASA7Polynomial] = None,
+        sutherland: Optional[Sutherland] = None,
+        polynomial: Optional[Polynomial] = None,
+        log_polynomial: Optional[LogPolynomial] = None,
     ):
         """
         Initialize mixture with metadata.
@@ -44,10 +44,10 @@ class Mixture:
         self.name = str(name)
         self.X = X
         self.W = W # molecular weight
-        self.nasa7: NASA7Polynomial = nasa7
-        self.sutherland: Sutherland = sutherland
-        self.polynomial: Polynomial = polynomial
-        self.log_polynomial: LogPolynomial = log_polynomial
+        self.nasa7: Optional[NASA7Polynomial] = nasa7
+        self.sutherland: Optional[Sutherland] = sutherland
+        self.polynomial: Optional[Polynomial] = polynomial
+        self.log_polynomial: Optional[LogPolynomial] = log_polynomial
 
     @classmethod
     def from_ct(
@@ -64,7 +64,7 @@ class Mixture:
         tol_nasa7: float = 1e-2,
         tol_nasa7_c0: float = 1e-6,
         tol_transport: float = 1e-1
-    ) -> Self:  # TODO: add hint to other from funcs.
+    ) -> Self:
         """
         Construct based on cantera Solution. It is assumed the gas object has
         correct mixture definition already.
@@ -145,7 +145,7 @@ class Mixture:
         )
 
 
-    def write_foam(self, output_dir):
+    def write_foam(self, output_dir: Path):
         """Write thermo transport data into OpenFOAM format."""
         # Create a dummy species list to use common writer function
         from ct2foam.species import Species, SpeciesList

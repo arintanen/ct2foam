@@ -1,12 +1,12 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from pathlib import Path
 import numpy as np
 if TYPE_CHECKING:
     from ct2foam.species import SpeciesList
 
 
-def write_species_list(file_name, species_names):
+def write_species_list(file_name: Path, species_names: list[str]):
     """
     Writes a species.foam file with an OpenFOAM formatted list of species.
     """
@@ -19,7 +19,7 @@ def write_species_list(file_name, species_names):
         output.write(");\n\n")
 
 
-def write_reactions(file_name):
+def write_reactions(file_name: Path):
     """
     Writes an empty reactions.foam file with an OpenFOAM formatted list of 0 reactions.
     """
@@ -30,21 +30,21 @@ def write_reactions(file_name):
 
 
 def write_thermo_transport(
-    file_name,
-    name,
-    MW,
-    As,
-    Ts,
-    poly_mu,
-    poly_kappa,
-    logpoly_mu,
-    logpoly_kappa,
-    nasa7_Tmid,
-    nasa7_Tlo,
-    nasa7_Thi,
-    nasa7_lo,
-    nasa7_hi,
-    elements=None,
+    file_name: Path,
+    name: str,
+    MW: float,
+    As: float,
+    Ts: float,
+    poly_mu: np.ndarray,
+    poly_kappa: np.ndarray,
+    logpoly_mu: np.ndarray,
+    logpoly_kappa: np.ndarray,
+    nasa7_Tmid: float,
+    nasa7_Tlo: float,
+    nasa7_Thi: float,
+    nasa7_lo: np.ndarray,
+    nasa7_hi: np.ndarray,
+    elements: Optional[dict] = None,
 ):
     """
     Writes thermophysicalProperties file required dictionary entries

@@ -1,8 +1,7 @@
 """Species class - lightweight container for species metadata and fitted coefficients."""
 
-from typing import List
+from typing import Iterator, Optional, Self, Union
 from pathlib import Path
-from typing import Self
 
 import numpy as np
 import cantera as ct
@@ -36,13 +35,13 @@ class Species:
 
     def __init__(
         self,
-        name,
-        W,
-        elements={},
-        nasa7=None,
-        sutherland=None,
-        polynomial=None,
-        log_polynomial=None,
+        name: str,
+        W: float,
+        elements: dict = {},
+        nasa7: Optional[NASA7Polynomial] = None,
+        sutherland: Optional[Sutherland] = None,
+        polynomial: Optional[Polynomial] = None,
+        log_polynomial: Optional[LogPolynomial] = None,
     ):
         """
         Initialize Species with metadata.
@@ -58,10 +57,10 @@ class Species:
         self.name = str(name)
         self.W = float(W)
         self.elements = elements
-        self.nasa7: NASA7Polynomial = nasa7
-        self.sutherland: Sutherland = sutherland
-        self.polynomial: Polynomial = polynomial
-        self.log_polynomial: LogPolynomial = log_polynomial
+        self.nasa7: Optional[NASA7Polynomial] = nasa7
+        self.sutherland: Optional[Sutherland] = sutherland
+        self.polynomial: Optional[Polynomial] = polynomial
+        self.log_polynomial: Optional[LogPolynomial] = log_polynomial
 
     @classmethod
     def from_ct(
@@ -75,7 +74,7 @@ class Species:
         tol_nasa7: float = 1e-2,
         tol_nasa7_c0: float = 1e-6,
         tol_transport: float = 1e-1
-    ) -> Self:  # TODO: add hint to other from funcs.
+    ) -> Self:
         """
         Construct based on cantera Species object.
         """
@@ -145,37 +144,37 @@ class SpeciesList:
     Here, we can extend to e.g. experimental data by adding new constructors.
     """
 
-    def __init__(self, species: List[Species] = []):
+    def __init__(self, species: list[Species] = []):
         self.species = species
 
     # Make SpeciesList behave like a Python sequence/iterable
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Species]:
         """Return iterator over contained Species objects."""
         return iter(self.species)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return number of Species in the list."""
         return len(self.species)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Species:
         """Indexing access, e.g. species_list[0]."""
         return self.species[idx]
 
-    def __contains__(self, item):
+    def __contains__(self, item: Union[str, "Species"]) -> bool:
         """Membership test. Accepts Species instance or species.name strings."""
         if isinstance(item, str):
             return any(sp.name == item for sp in self.species)
         return item in self.species
 
-    def append(self, item):
+    def append(self, item: Species):
         """Append a Species to the list."""
         self.species.append(item)
 
-    def extend(self, items):
+    def extend(self, items: list[Species]):
         """Extend list with multiple Species."""
         self.species.extend(items)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"SpeciesList({self.species!r})"
 
     @classmethod
@@ -226,6 +225,6 @@ class SpeciesList:
 
         return cls(species_list)
 
-    def write_foam(self, output_dir):
+    def write_foam(self, output_dir: Path):
         """Write thermo transport data into OpenFOAM format."""
         writer.write_foam(self, output_dir)
