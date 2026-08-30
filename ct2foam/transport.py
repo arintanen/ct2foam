@@ -8,27 +8,37 @@ import cantera as ct
 from numpy import typing as npt
 from matplotlib import pyplot as plt
 
+
+@dataclass
 @dataclass
 class TransportData:
-    # Universal gas constant [J/kmol/K]
+    """Container for transport data sampled over a temperature range.
+
+    Attributes:
+        gas_constant: universal gas constant [J/kmol/K]
+        temperature: sample temperatures [K]
+        cp: molar heat capacity [J/kmol/K]
+        mu: dynamic viscosity [Pa·s]
+        k: thermal conductivity [W/m/K]
+        cv: molar heat capacity at constant volume [J/kmol/K]
+        W: mean molecular weight [kg/kmol]
+    """
+
     gas_constant: float
-    # Temperature [K]
     temperature: npt.NDArray[np.floating]
-    # Molar heat capacity [J/kmol/K]
     cp: npt.NDArray[np.floating]
-    # Viscosity [Pa s]
     mu: npt.NDArray[np.floating]
-    # Conductivity [W/m/K]
     k: npt.NDArray[np.floating]
-    # Specific heat in constant volume [J/kmol/K]
     cv: npt.NDArray[np.floating]
-    # Mean molecular weight [kg/kmol]
     W: float
 
     @classmethod
     def from_ct(cls, gas: ct.Solution, temperature: npt.NDArray[np.floating]) -> Self:
-        """
-        Evaluate data for fitting based on Cantera species.
+        """Evaluate transport and thermo data from a Cantera Solution object.
+
+        Args:
+            gas: Cantera Solution
+            temperature: sample temperatures in Kelvin
         """
         # For mixtures, we retain the existing X
         X = gas.X
@@ -47,7 +57,15 @@ class TransportData:
             cp[i] = gas.cp_mole
             cv[i] = gas.cv_mole
 
-        return cls(temperature=temperature, gas_constant=ct.gas_constant, mu=mu, k=k, cp=cp, cv=cv, W=W)
+        return cls(
+            temperature=temperature,
+            gas_constant=ct.gas_constant,
+            mu=mu,
+            k=k,
+            cp=cp,
+            cv=cv,
+            W=W,
+        )
 
 
 class TransportFunction:
@@ -78,36 +96,47 @@ class TransportFunction:
         return self.kappa(T)
 
     def evaluate_transport_fit_quality(self, reference_data: TransportData) -> dict:
-        """
-        Evaluate L2 error between this transport fit and reference data.
-        Return dictionary for viscosity and kappa error estimates.
+        """Evaluate L2 error of this transport fit against reference data.
+
+        Returns:
+            dict with keys 'mu' and 'kappa' - relative L2 errors for viscosity
+            and thermal conductivity respectively.
         """
         T = reference_data.temperature
 
         mu_fit = self.mu(T)
         kappa_fit = self._kappa_from_data(T, reference_data)
 
-        err_mu = np.linalg.norm(mu_fit - reference_data.mu) / np.linalg.norm(reference_data.mu)
-        err_kappa = np.linalg.norm(kappa_fit - reference_data.k) / np.linalg.norm(reference_data.k)
+        err_mu = np.linalg.norm(mu_fit - reference_data.mu) / np.linalg.norm(
+            reference_data.mu
+        )
+        err_kappa = np.linalg.norm(kappa_fit - reference_data.k) / np.linalg.norm(
+            reference_data.k
+        )
 
         return {"mu": err_mu, "kappa": err_kappa}
 
 
 class Sutherland(TransportFunction):
-    """Sutherland viscosity model with Euken thermal conductivity."""
+    """Sutherland viscosity model with Euken thermal conductivity.
+
+    Args:
+        As: Sutherland coefficient [Pa·s/K^0.5]
+        Ts: Sutherland temperature [K]
+    """
+
     def __init__(self, As: float, Ts: float):
         self.As = float(As)
         self.Ts = float(Ts)
         self.name = "sutherland"
 
     @classmethod
-    def from_ct(
-        cls,
-        gas: ct.Solution,
-        temperature: np.ndarray
-    ) -> Self:
-        """
-        Build accordingly.
+    def from_ct(cls, gas: ct.Solution, temperature: np.ndarray) -> Self:
+        """Construct by fitting Sutherland coefficients to Cantera transport data.
+
+        Args:
+            gas: Cantera Solution
+            temperature: sample temperatures in Kelvin
         """
         data = TransportData.from_ct(gas, temperature)
         return cls.fit(data.temperature, data.mu)
@@ -118,7 +147,9 @@ class Sutherland(TransportFunction):
         return As * np.sqrt(T) / (1.0 + Ts / T)
 
     @classmethod
-    def fit(cls, T: np.ndarray, mu: np.ndarray, p0: Optional[np.ndarray] = None) -> Self:
+    def fit(
+        cls, T: np.ndarray, mu: np.ndarray, p0: Optional[np.ndarray] = None
+    ) -> Self:
         """Fit Sutherland parameters from viscosity data.
 
         Args:
@@ -147,7 +178,9 @@ class Sutherland(TransportFunction):
         """
         return self.sutherland_func(T, self.As, self.Ts)
 
-    def kappa(self, T: np.ndarray, cv_mole: np.ndarray, W: float, R: float) -> np.ndarray:
+    def kappa(
+        self, T: np.ndarray, cv_mole: np.ndarray, W: float, R: float
+    ) -> np.ndarray:
         """
         Evaluate Euken thermal conductivity based on OpenFOAM formulation:
         mu * Cv * (1.32 + 1.77*R_specific/Cv).
@@ -160,33 +193,45 @@ class Sutherland(TransportFunction):
 
     def _kappa_from_data(self, T, reference_data: TransportData):
         """Evaluate Euken kappa using cv, W and R from the reference data."""
-        return self.kappa(T, reference_data.cv, reference_data.W, reference_data.gas_constant)
-
-
+        return self.kappa(
+            T, reference_data.cv, reference_data.W, reference_data.gas_constant
+        )
 
 
 class Polynomial(TransportFunction):
-    """Standard or log-polynomial transport fit."""
+    """Standard polynomial transport fit for viscosity and thermal conductivity.
 
-    def __init__(self, coeffs_mu: np.ndarray, coeffs_kappa: np.ndarray, poly_type: str = "polynomial"):
+    Args:
+        coeffs_mu: polynomial coefficients for viscosity (descending order)
+        coeffs_kappa: polynomial coefficients for thermal conductivity
+        poly_type: label string (default: ``"polynomial"``)
+    """
+
+    def __init__(
+        self,
+        coeffs_mu: np.ndarray,
+        coeffs_kappa: np.ndarray,
+        poly_type: str = "polynomial",
+    ):
         self.coeffs_mu = np.asarray(coeffs_mu, dtype=float)
         self.coeffs_kappa = np.asarray(coeffs_kappa, dtype=float)
         self.name = "polynomial"
 
     @classmethod
-    def from_ct(
-        cls,
-        gas: ct.Solution,
-        temperature: np.ndarray
-    ) -> Self:
-        """
-        Build accordingly.
+    def from_ct(cls, gas: ct.Solution, temperature: np.ndarray) -> Self:
+        """Construct by fitting polynomial coefficients to Cantera transport data.
+
+        Args:
+            gas: Cantera Solution
+            temperature: sample temperatures in Kelvin
         """
         data = TransportData.from_ct(gas, temperature)
         return cls.fit_polynomial(data.temperature, data.mu, data.k)
 
     @classmethod
-    def fit_polynomial(cls, T: np.ndarray, mu: np.ndarray, kappa: np.ndarray, poly_order: int = 3) -> Self:
+    def fit_polynomial(
+        cls, T: np.ndarray, mu: np.ndarray, kappa: np.ndarray, poly_order: int = 3
+    ) -> Self:
         """Fit standard polynomial transport coefficients.
 
         Args:
@@ -215,7 +260,12 @@ class Polynomial(TransportFunction):
 
 
 class LogPolynomial(TransportFunction):
-    """Log-polynomial transport fit."""
+    """Log-polynomial transport fit (fits against log(T)).
+
+    Args:
+        coeffs_mu: polynomial coefficients for log(viscosity) (descending order)
+        coeffs_kappa: polynomial coefficients for log(thermal conductivity)
+    """
 
     def __init__(self, coeffs_mu: np.ndarray, coeffs_kappa: np.ndarray):
         self.coeffs_mu = np.asarray(coeffs_mu, dtype=float)
@@ -224,19 +274,22 @@ class LogPolynomial(TransportFunction):
 
     @classmethod
     def from_ct(
-        cls,
-        gas: ct.Solution,
-        temperature: np.ndarray,
-        poly_type: str = "polynomial"
+        cls, gas: ct.Solution, temperature: np.ndarray, poly_type: str = "polynomial"
     ) -> Self:
-        """
-        Build accordingly.
+        """Construct by fitting log-polynomial coefficients to Cantera transport data.
+
+        Args:
+            gas: Cantera Solution
+            temperature: sample temperatures in Kelvin
+            poly_type: label (unused, kept for interface compatibility)
         """
         data = TransportData.from_ct(gas, temperature)
         return cls.fit_log_polynomial(data.temperature, data.mu, data.k)
 
     @classmethod
-    def fit_log_polynomial(cls, T: np.ndarray, mu: np.ndarray, kappa: np.ndarray, poly_order: int = 3) -> Self:
+    def fit_log_polynomial(
+        cls, T: np.ndarray, mu: np.ndarray, kappa: np.ndarray, poly_order: int = 3
+    ) -> Self:
         """Fit log-polynomial transport coefficients.
 
         Args:
@@ -277,6 +330,7 @@ def plot_transport_fits(
     """
 
     import itertools
+
     linestyles = itertools.cycle(["-", "--", ":"])
     colors = itertools.cycle(["b", "g", "b"])
 
@@ -288,11 +342,15 @@ def plot_transport_fits(
     ax1.plot(T, data.mu, "-", color="r", label="reference")
     ax2.plot(T, data.k, "-", color="r", label="reference")
 
-    for fit in  fits:
-        ax1.plot(T, fit.mu(T), linestyle=next(linestyles), color=next(colors), label=fit.name)
+    for fit in fits:
+        ax1.plot(
+            T, fit.mu(T), linestyle=next(linestyles), color=next(colors), label=fit.name
+        )
         kappa = fit._kappa_from_data(T, data)
 
-        ax2.plot(T, kappa, linestyle=next(linestyles), color=next(colors), label=fit.name)
+        ax2.plot(
+            T, kappa, linestyle=next(linestyles), color=next(colors), label=fit.name
+        )
 
     ax1.set_ylabel(r"$\mu$")
     ax2.set_ylabel(r"$\kappa$")

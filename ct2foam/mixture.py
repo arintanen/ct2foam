@@ -21,11 +21,19 @@ import ct2foam.foam_writer as writer
 
 
 class Mixture:
-    """
-    Lightweight container for mixture metadata and fitted coefficients.
+    """Lightweight container for mixture metadata and fitted coefficients.
 
-    This class stores species properties and the results of thermodynamic
-    and transport fitting, similar to the Species class.
+    Similar to ``Species`` but represents a gas mixture rather than a single
+    species. Does not store data arrays - they are passed to fitting methods.
+
+    Args:
+        name: mixture name / label
+        X: mole fraction dict (e.g. ``{'O2': 0.21, 'N2': 0.79}``)
+        W: mean molecular weight [kg/kmol]
+        nasa7: fitted NASA7 polynomial
+        sutherland: fitted Sutherland transport model
+        polynomial: fitted polynomial transport model
+        log_polynomial: fitted log-polynomial transport model
     """
 
     def __init__(
@@ -33,21 +41,18 @@ class Mixture:
         name: str,
         X: dict,
         W: float,
-        nasa7: Optional[NASA7Polynomial] = None,
-        sutherland: Optional[Sutherland] = None,
-        polynomial: Optional[Polynomial] = None,
-        log_polynomial: Optional[LogPolynomial] = None,
+        nasa7: NASA7Polynomial,
+        sutherland: Sutherland,
+        polynomial: Polynomial,
+        log_polynomial: LogPolynomial,
     ):
-        """
-        Initialize mixture with metadata.
-        """
         self.name = str(name)
         self.X = X
-        self.W = W # molecular weight
-        self.nasa7: Optional[NASA7Polynomial] = nasa7
-        self.sutherland: Optional[Sutherland] = sutherland
-        self.polynomial: Optional[Polynomial] = polynomial
-        self.log_polynomial: Optional[LogPolynomial] = log_polynomial
+        self.W = W  # molecular weight
+        self.nasa7: NASA7Polynomial = nasa7
+        self.sutherland: Sutherland = sutherland
+        self.polynomial: Polynomial = polynomial
+        self.log_polynomial: LogPolynomial = log_polynomial
 
     @classmethod
     def from_ct(
@@ -63,11 +68,23 @@ class Mixture:
         fig_dir: Path = Path.cwd(),
         tol_nasa7: float = 1e-2,
         tol_nasa7_c0: float = 1e-6,
-        tol_transport: float = 1e-1
+        tol_transport: float = 1e-1,
     ) -> Self:
-        """
-        Construct based on cantera Solution. It is assumed the gas object has
-        correct mixture definition already.
+        """Construct by fitting thermo and transport models for a gas mixture.
+
+        Args:
+            mechanism_file: path to the Cantera mechanism file
+            mixture_name: label for the mixture (used in output)
+            mixture: Cantera mixture string (e.g. ``"O2:0.21,N2:0.79"``)
+            Tmin: lower temperature bound [K]
+            Tmax: upper temperature bound [K]
+            Tmid: common NASA7 mid-point temperature [K]
+            n: number of sample points for fitting (default: 128)
+            plot: if True, save fit quality plots to ``fig_dir``
+            fig_dir: directory for plot output (default: cwd)
+            tol_nasa7: tolerance for NASA7 consistency check
+            tol_nasa7_c0: tolerance for C0 continuity check
+            tol_transport: tolerance for transport fit quality check
         """
         gas = ct.Solution(mechanism_file)
         gas.transport_model = "multicomponent"
@@ -92,9 +109,9 @@ class Mixture:
         ref_data_thermo = ThermoData.from_ct_mixture(gas, T)
         ref_data_transport = TransportData.from_ct(gas, np.linspace(Tmin, Tmax, n))
 
-
         if max_c0 > tol_nasa7_c0 or max_err > tol_nasa7:
             import tempfile
+
             fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
             plot_nasa7_fit(ref_data_thermo, nasa7, fig_path)
             raise ValueError(
@@ -107,11 +124,12 @@ class Mixture:
             err = tfi.evaluate_transport_fit_quality(ref_data_transport)
             if err["mu"] > tol_transport or err["kappa"] > tol_transport:
                 import tempfile
+
                 fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
                 plot_transport_fits(
                     ref_data_transport,
                     [sutherland, polynomial, log_polynomial],
-                    fig_path
+                    fig_path,
                 )
                 raise ValueError(
                     "Transport function fit error is too large:"
@@ -144,11 +162,19 @@ class Mixture:
             log_polynomial=log_polynomial,
         )
 
-
     def write_foam(self, output_dir: Path):
         """Write thermo transport data into OpenFOAM format."""
         # Create a dummy species list to use common writer function
         from ct2foam.species import Species, SpeciesList
-        species = Species(self.name, W=self.W, elements={}, nasa7=self.nasa7, sutherland=self.sutherland, polynomial=self.polynomial, log_polynomial=self.log_polynomial)
+
+        species = Species(
+            self.name,
+            W=self.W,
+            elements={},
+            nasa7=self.nasa7,
+            sutherland=self.sutherland,
+            polynomial=self.polynomial,
+            log_polynomial=self.log_polynomial,
+        )
         species_list = SpeciesList(species=[species])
         writer.write_foam(species_list, output_dir)

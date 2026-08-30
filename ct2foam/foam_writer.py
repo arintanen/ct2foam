@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 from pathlib import Path
 import numpy as np
+
 if TYPE_CHECKING:
     from ct2foam.species import SpeciesList
 
@@ -46,16 +47,25 @@ def write_thermo_transport(
     nasa7_hi: np.ndarray,
     elements: Optional[dict] = None,
 ):
-    """
-    Writes thermophysicalProperties file required dictionary entries
-    according to given data.
-    file_name: output file name.
-    name: species name / mixture name
-    MW: molecular weight
-    As, Ts: Sutherland entries
-    poly*: transport polynomial entries
-    nasa7*: NASA7 polynomial coefficient entry data
-    elements: a dictionary with the following syntax:  elements = {"C": 1, "H":1}
+    """Write thermophysicalProperties block for one species or mixture.
+
+    Args:
+        file_name: output file path (opened in append mode)
+        name: species or mixture name used as the dict key
+        MW: molecular weight [kg/kmol]
+        As: Sutherland coefficient [Pa·s/K^0.5]
+        Ts: Sutherland temperature [K]
+        poly_mu: polynomial viscosity coefficients (descending order)
+        poly_kappa: polynomial thermal conductivity coefficients (descending order)
+        logpoly_mu: log-polynomial viscosity coefficients (descending order)
+        logpoly_kappa: log-polynomial thermal conductivity coefficients
+                       (descending order)
+        nasa7_Tmid: NASA7 common mid-point temperature [K]
+        nasa7_Tlo: lower temperature bound [K]
+        nasa7_Thi: upper temperature bound [K]
+        nasa7_lo: 7 NASA7 coefficients for the low-temperature range
+        nasa7_hi: 7 NASA7 coefficients for the high-temperature range
+        elements: elemental composition dict (e.g. ``{"C": 1, "H": 4}``)
     """
     # Numpy-based polynomial fit has a reversed order to OpenFoam dictionary definition
     poly_mu_rev = np.copy(poly_mu)
@@ -159,14 +169,7 @@ def write_thermo_transport(
 
 
 def write_foam(species: "SpeciesList", output_dir: Path):
-    """Write OpenFOAM output files using foam_writer.
-
-    Args:
-        output_dir: Directory to write output files
-
-    Raises:
-        RuntimeError: If fitting has not been performed yet
-    """
+    """Write OpenFOAM output files using foam_writer."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -190,9 +193,7 @@ def write_foam(species: "SpeciesList", output_dir: Path):
 
         poly_mu = sp.polynomial.coeffs_mu if sp.polynomial else np.zeros(4)
         poly_kappa = sp.polynomial.coeffs_kappa if sp.polynomial else np.zeros(4)
-        logpoly_mu = (
-            sp.log_polynomial.coeffs_mu if sp.log_polynomial else np.zeros(4)
-        )
+        logpoly_mu = sp.log_polynomial.coeffs_mu if sp.log_polynomial else np.zeros(4)
         logpoly_kappa = (
             sp.log_polynomial.coeffs_kappa if sp.log_polynomial else np.zeros(4)
         )

@@ -9,6 +9,7 @@ temperature (Tmid) is enforced across all species, as OpenFOAM requires
 all species to share the same NASA7 transition temperature.
 Run via ``ct2foam --help`` or ``python -m ct2foam``.
 """
+
 import argparse
 from datetime import date
 from pathlib import Path
@@ -17,11 +18,10 @@ from pathlib import Path
 from ct2foam.species import SpeciesList
 from ct2foam.mixture import Mixture
 
-# TODO: LICENSE + docstrings - CHECK lsqlin MIT licence - is it contaminating this to MIT as well?
-# TODO: Go through the original TODO.md
+
 def main():
+    """Parse CLI arguments and run the ct2foam conversion pipeline."""
     parser = argparse.ArgumentParser(
-        description=(
             "Convert cantera-based transport and thermodynamic"
             " data into OpenFOAM format."
         )
@@ -143,7 +143,7 @@ def main():
             fig_dir=fig_dir,
             tol_nasa7=args.tol_nasa7,
             tol_nasa7_c0=args.tol_nasa7_c0,
-            tol_transport=args.tol_transport
+            tol_transport=args.tol_transport,
         )
 
         mixture.write_foam(output_dir)
@@ -160,7 +160,7 @@ def main():
         plot=True,
         fig_dir=fig_dir,
         tol_nasa7=args.tol_nasa7,
-        tol_nasa7_c0=args.tol_nasa7_c0
+        tol_nasa7_c0=args.tol_nasa7_c0,
     )
     species_list.write_foam(output_dir)
     print("\nDone")

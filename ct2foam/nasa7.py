@@ -41,6 +41,18 @@ _Tstd = 298.15
 
 @dataclass
 class ThermoData:
+    """Molar thermodynamic data sampled over a temperature range.
+
+    Attributes:
+        gas_constant: universal gas constant [J/kmol/K]
+        temperature: sample temperatures [K]
+        cp: molar heat capacity [J/kmol/K]
+        h: molar enthalpy [J/kmol]
+        s: molar entropy [J/kmol/K]
+        cp0: standard-state cp at 298.15 K [J/kmol/K]
+        dhf: enthalpy of formation at 298.15 K [J/kmol]
+        s0: standard entropy at 298.15 K [J/kmol/K]
+    """
     # Universal gas constant [J/kmol/K]
     gas_constant: float
     # Temperature [K]
@@ -62,12 +74,15 @@ class ThermoData:
     def from_ct(
         cls, species: ct.Species, temperature: npt.NDArray[np.floating]
     ) -> Self:
-        """
-        Evaluate data for fitting based on Cantera species.
-        It is worth noting that infering data via species.thermo.cp() yields
-        different floating point value than gas.cp_mole in given mixture temperature.
-        Discrepancy is O(1e-9) but enough to influence unit tests compared to old version.
-        One needs to be careful when comparin 1-1 results between old and new.
+        """Evaluate molar thermo data from a Cantera Species object.
+
+        Note: ``species.thermo.cp()`` may differ from ``gas.cp_mole`` at the same
+        temperature by O(1e-9) due to floating-point differences. Take care when
+        comparing results between code paths.
+
+        Args:
+            species: Cantera species object with a valid thermo model
+            temperature: sample temperatures in Kelvin
         """
         # Note, thermo class properties are molar values
         cp0 = species.thermo.cp(_Tstd)
@@ -84,13 +99,15 @@ class ThermoData:
 
         return cls(ct.gas_constant, temperature, cp, h, s, cp0, dhf, s0)
 
-
     @classmethod
     def from_ct_mixture(
         cls, gas: ct.Solution, temperature: npt.NDArray[np.floating]
     ) -> Self:
-        """
-        Evaluate data for fitting based on Cantera Solution object.
+        """Evaluate molar thermo data from a Cantera Solution (mixture).
+
+        Args:
+            gas: Cantera Solution
+            temperature: sample temperatures in Kelvin
         """
         gas.TP = _Tstd, ct.one_atm
         cp0 = gas.cp_mole
@@ -110,9 +127,24 @@ class ThermoData:
 
 
 class NASA7Polynomial:
-    """Encapsulates NASA7 polynomial coefficients and evaluation methods."""
+    """Encapsulates NASA7 polynomial coefficients and evaluation methods.
 
-    def __init__(self, coeffs_low: np.ndarray, coeffs_high: np.ndarray, Tmid: float, Tmin: float, Tmax: float):
+    Args:
+        coeffs_low: 7 NASA7 coefficients for the low-temperature range
+        coeffs_high: 7 NASA7 coefficients for the high-temperature range
+        Tmid: mid-point temperature [K] (boundary between low/high ranges)
+        Tmin: lower temperature bound [K]
+        Tmax: upper temperature bound [K]
+    """
+
+    def __init__(
+        self,
+        coeffs_low: np.ndarray,
+        coeffs_high: np.ndarray,
+        Tmid: float,
+        Tmin: float,
+        Tmax: float,
+    ):
         self.coeffs_low = np.asarray(coeffs_low, dtype=float)
         self.coeffs_high = np.asarray(coeffs_high, dtype=float)
         self.Tmid = Tmid
@@ -134,8 +166,19 @@ class NASA7Polynomial:
         n: int = 128,
         tol_c0: float = 1e-6,
     ) -> Self:
-        """
-        Construct from Cantera Species object
+        """Construct from a Cantera Species object, refitting if necessary.
+
+        Reuses the existing NASA7 polynomial data from Cantera when the
+        temperature range matches and the fit is sufficiently C0-continuous;
+        otherwise refits over the given range.
+
+        Args:
+            species: Cantera species object with a valid NASA7 thermo model
+            Tmin: lower temperature bound [K]
+            Tmax: upper temperature bound [K]
+            Tmid: common mid-point temperature [K]
+            n: number of sample points used for refitting (default: 128)
+            tol_c0: tolerance for C0 continuity check (default: 1e-6)
         """
         # Use existing NASA7 polynomials if possible
         full_refit_required = False
@@ -199,15 +242,19 @@ class NASA7Polynomial:
 
     @classmethod
     def from_ct_mixture(
-        cls,
-        gas: ct.Solution,
-        Tmin: float,
-        Tmax: float,
-        Tmid: float,
-        n: int = 128
+        cls, gas: ct.Solution, Tmin: float, Tmax: float, Tmid: float, n: int = 128
     ) -> Self:
-        """
-        Construct from Cantera Solution object
+        """Construct by fitting a full NASA7 polynomial to a Cantera mixture.
+
+        Always performs a full fit (no reuse path) as there is no pre-existing
+        mixture polynomial in Cantera.
+
+        Args:
+            gas: Cantera Solution
+            Tmin: lower temperature bound [K]
+            Tmax: upper temperature bound [K]
+            Tmid: common mid-point temperature [K]
+            n: number of sample points (default: 128)
         """
 
         print("\nGenerating NASA7 polynomial for mixture")
@@ -221,7 +268,6 @@ class NASA7Polynomial:
         nasa7 = cls.fit_full(thermo_data, Tmin, Tmax, Tmid)
         nasa7.fit_quality(thermo_data)
         return nasa7
-
 
     # -- private single-range evaluators --
 
@@ -592,8 +638,8 @@ class NASA7Polynomial:
     def _correct_coeffs(coeffs, Tcommon, dhf_over_R, s0_over_R):
         """
         Solving additional constant over means of conservation of enthalpy and entropy
-        and ensuring C0 continuity at T=Tcommon
-        coeffs = 14 size nasa coeffs without Tcommon in 0.
+        and ensuring C0 continuity.
+        T=Tcommon
         coeffs: array [M=14,] of NASA7 coefficients for low/high temperature range.
         dhf_over_R: enthalpy of formation at standard conditions.
         s0_over_R: entropy at standard conditions.
@@ -667,7 +713,15 @@ class NASA7Polynomial:
         return coeffs
 
     def fit_quality(self, data: ThermoData) -> dict:
-        """Check L2 error of coefficients against reference data."""
+        """Compute fit quality metrics against reference data.
+
+        Returns:
+            dict with keys:
+                ``c0_continuity``: dict with 'cp', 'dcpdT', 'h', 's' - relative
+                    C0 errors at Tmid.
+                ``consistency``: dict with 'cp', 'h', 's' - relative L2 errors
+                    against the reference data over the full temperature range.
+        """
 
         # C0 / C1 continuity
         c0 = self.continuity_error()
@@ -690,8 +744,10 @@ class NASA7Polynomial:
         return quality
 
     def c0_continuity(self, func: Callable) -> float:
-        """
-        Evaluate C0 continuity for a given function
+        """Compute the relative C0 discontinuity of ``func`` at Tmid.
+
+        Args:
+            func: callable with signature ``func(coeffs, T) -> float``
         """
         val_low = func(self.coeffs_low, self.Tmid)
         val_high = func(self.coeffs_high, self.Tmid)
@@ -707,6 +763,7 @@ class NASA7Polynomial:
         return quality
 
     def is_c0_continuous(self, tol: float = 1e-6) -> bool:
+        """Return True if all C0 continuity errors at Tmid are below ``tol``."""
         quality = self.continuity_error()
         return max(quality["cp"], quality["dcpdT"], quality["h"], quality["s"]) < tol
 

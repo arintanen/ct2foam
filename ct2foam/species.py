@@ -15,22 +15,28 @@ from .transport import (
     Polynomial,
     LogPolynomial,
     plot_transport_fits,
-    TransportData
+    TransportData,
 )
 import ct2foam.foam_writer as writer
 
 
 class Species:
-    """
-    Lightweight container for species metadata and fitted coefficients.
+    """Lightweight container for species metadata and fitted coefficients.
 
     Virtually similar to Cantera's Species class. Not inherited to allow
-    extendability to e.g. experimental data and to avoid sudden API
-    changes.
+    extendability to experimental data and to avoid sudden API changes.
 
-    This class stores species properties and the results of thermodynamic
-    and transport fitting. Data arrays (T, cp, h, s, mu, kappa) are NOT
-    stored - they are passed as arguments to fitting and quality check methods.
+    Data arrays (T, cp, h, s, mu, kappa) are NOT stored - they are passed
+    as arguments to fitting and quality-check methods.
+
+    Args:
+        name: species name
+        W: molecular weight [kg/kmol]
+        elements: elemental composition dict (e.g. ``{'C': 1, 'H': 4}``)
+        nasa7: fitted NASA7 polynomial
+        sutherland: fitted Sutherland transport model
+        polynomial: fitted polynomial transport model
+        log_polynomial: fitted log-polynomial transport model
     """
 
     def __init__(
@@ -43,17 +49,6 @@ class Species:
         polynomial: Polynomial,
         log_polynomial: LogPolynomial,
     ):
-        """
-        Initialize Species with metadata.
-
-        Args:
-            name: Species name
-            W: Molecular weight (kg/kmol)
-            cp0_over_R: Standard-state cp/R at 298.15K
-            dhf_over_R: Standard-state enthalpy/R at 298.15K
-            s0_over_R: Standard-state entropy/R at 298.15K
-            elements: Elemental composition dict (e.g., {'C': 1, 'H': 4})
-        """
         self.name = str(name)
         self.W = float(W)
         self.elements: dict = elements
@@ -73,10 +68,20 @@ class Species:
         n: int = 128,
         tol_nasa7: float = 1e-2,
         tol_nasa7_c0: float = 1e-6,
-        tol_transport: float = 1e-1
+        tol_transport: float = 1e-1,
     ) -> Self:
-        """
-        Construct based on cantera Species object.
+        """Construct from a Cantera Solution object for a named species.
+
+        Args:
+            gas: Cantera Solution
+            species_name: name of the species to extract
+            Tmin: lower temperature bound [K]
+            Tmax: upper temperature bound [K]
+            Tmid: common NASA7 mid-point temperature [K]
+            n: number of sample points for fitting (default: 128)
+            tol_nasa7: tolerance for NASA7 consistency check
+            tol_nasa7_c0: tolerance for C0 continuity check
+            tol_transport: tolerance for transport fit quality check
         """
         species = gas.species(gas.species_index(species_name))
         W = species.molecular_weight
@@ -99,6 +104,7 @@ class Species:
 
         if max_c0 > tol_nasa7_c0 or max_err > tol_nasa7:
             import tempfile
+
             fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
             cls.plot_nasa7_fit(species, nasa7, fig_path)
             raise ValueError(
@@ -107,16 +113,15 @@ class Species:
                 f"\nPlease see figure: {fig_path}"
             )
 
-        ref_data =  TransportData.from_ct(gas, T)
+        ref_data = TransportData.from_ct(gas, T)
         for tfi in [sutherland, polynomial, log_polynomial]:
             err = tfi.evaluate_transport_fit_quality(ref_data)
             if err["mu"] > tol_transport or err["kappa"] > tol_transport:
                 import tempfile
+
                 fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
                 plot_transport_fits(
-                    ref_data,
-                    [sutherland, polynomial, log_polynomial],
-                    fig_path
+                    ref_data, [sutherland, polynomial, log_polynomial], fig_path
                 )
                 raise ValueError(
                     "Transport function fit error is too large:"
@@ -189,11 +194,24 @@ class SpeciesList:
         fig_dir: Path = Path.cwd(),
         tol_nasa7: float = 1e-2,
         tol_nasa7_c0: float = 1e-6,
-        tol_transport: float = 1e-1
+        tol_transport: float = 1e-1,
     ) -> Self:
-        """
-        Build species container based on cantera mechanism file and refit
-        any data if found invalid.
+        """Build a SpeciesList from a Cantera mechanism file.
+
+        Iterates over all species in the mechanism, fits each one, and stores
+        them in the container.
+
+        Args:
+            mechanism_file: path to the Cantera mechanism file (e.g. ``h2o2.yaml``)
+            Tmin: lower temperature bound [K]
+            Tmax: upper temperature bound [K]
+            Tmid: common NASA7 mid-point temperature [K] (shared across all species)
+            n: number of sample points for fitting (default: 128)
+            plot: if True, save fit quality plots to ``fig_dir``
+            fig_dir: directory for plot output (default: cwd)
+            tol_nasa7: tolerance for NASA7 consistency check
+            tol_nasa7_c0: tolerance for C0 continuity check
+            tol_transport: tolerance for transport fit quality check
         """
         gas = ct.Solution(mechanism_file)
         gas.transport_model = "multicomponent"
@@ -201,7 +219,17 @@ class SpeciesList:
         species_list = []
         # Construct Species object and append to a list
         for sp_name in gas.species_names:
-            spi = Species.from_ct(gas, sp_name, Tmin, Tmax, Tmid, n, tol_nasa7, tol_nasa7_c0, tol_transport)
+            spi = Species.from_ct(
+                gas,
+                sp_name,
+                Tmin,
+                Tmax,
+                Tmid,
+                n,
+                tol_nasa7,
+                tol_nasa7_c0,
+                tol_transport,
+            )
             species_list.append(spi)
 
             # Plot comparison to the reference data
@@ -212,15 +240,15 @@ class SpeciesList:
                 # with plotting related actions. Pretty fast anyway.
                 ct_spi = gas.species(gas.species_index(spi.name))
                 ref_data = ThermoData.from_ct(ct_spi, T)
-                file_path=Path(fig_dir, f"{spi.name}_thermo.png")
+                file_path = Path(fig_dir, f"{spi.name}_thermo.png")
                 plot_nasa7_fit(ref_data, spi.nasa7, file_path)
 
-                file_path=Path(fig_dir, f"{spi.name}_transport.png")
+                file_path = Path(fig_dir, f"{spi.name}_transport.png")
                 ref_data = TransportData.from_ct(gas, T)
                 plot_transport_fits(
                     ref_data,
                     [spi.sutherland, spi.polynomial, spi.log_polynomial],
-                    file_path
+                    file_path,
                 )
 
         return cls(species_list)
