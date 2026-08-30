@@ -24,7 +24,6 @@ def main():
     parser = argparse.ArgumentParser(
             "Convert cantera-based transport and thermodynamic"
             " data into OpenFOAM format."
-        )
     )
     parser.add_argument(
         "-i",
