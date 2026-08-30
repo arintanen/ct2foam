@@ -32,7 +32,7 @@ outputs OpenFoam compatible thermodynamical and transport dictionary entries und
 
 ### Convert a mixture 
 ```
-ct2foam --input h2o2.yaml --mixture "O2:1, N2:3.67" --mixture-name GG --output test
+ct2foam --input h2o2.yaml --mixture "O2:1, N2:3.67" --mixture-name test_output --output test
 ```
 
 ### See <code>ct2foam -h</code> for help.
