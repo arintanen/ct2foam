@@ -80,26 +80,26 @@ int main(int argc, char *argv[])
 
     dictionary dict(IFstream("thermoDict")());
 
-    constThermo tc(dict.subDict("specie1"));
+    constThermo tc("specie1", dict.subDict("specie1"));
     Info << "Universal gas constant:" << endl;
     std::cout << std::setprecision(15) << tc.R()*tc.W() << '\n' << endl;
 
     Info << "\nConstant:" << endl;
     Info << "specie1" << endl;
     Info<< "R = " << tc.R() << endl;
-    Info<< "cp = " << tc.cp(1, 1) << endl;
+    Info<< "cp = " << tc.Cp(1, 1) << endl;
     Info<< "Cp = " << tc.Cp(1, 1) << endl;
-    Info<< "cv = " << tc.cv(1, 1) << endl;
+    Info<< "cv = " << tc.Cv(1, 1) << endl;
     Info<< "Cv = " << tc.Cv(1, 1) << endl;
     Info<< "mu = " << tc.mu(1, 1) << endl;
     Info<< "kappa = " << tc.kappa(1, 1) << endl;
 
     Info << "\nspecie2" << endl;
-    constThermo tc2(dict.subDict("specie2"));
+    constThermo tc2("specie2", dict.subDict("specie2"));
     Info<< "R = " << tc2.R() << endl;
-    Info<< "cp = " << tc2.cp(1, 1) << endl;
+    Info<< "cp = " << tc2.Cp(1, 1) << endl;
     Info<< "Cp = " << tc2.Cp(1, 1) << endl;
-    Info<< "cv = " << tc2.cv(1, 1) << endl;
+    Info<< "cv = " << tc2.Cv(1, 1) << endl;
     Info<< "Cv = " << tc2.Cv(1, 1) << endl;
     Info<< "mu = " << tc2.mu(1, 1) << endl;
     Info<< "kappa = " << tc2.kappa(1, 1) << endl;
@@ -107,39 +107,39 @@ int main(int argc, char *argv[])
 
     Info << "\nSutherland:" << endl;
     Info << "specie3" << endl;    
-    sutherlandThermo ts(dict.subDict("specie3"));
+    sutherlandThermo ts("specie3", dict.subDict("specie3"));
     Info<< "R = " << ts.R() << endl;
-    Info<< "cp = " << ts.cp(1, 1) << endl;
+    Info<< "cp = " << ts.Cp(1, 1) << endl;
     Info<< "Cp = " << ts.Cp(1, 1) << endl;
-    Info<< "cv = " << ts.cv(1, 1) << endl;
+    Info<< "cv = " << ts.Cv(1, 1) << endl;
     Info<< "Cv = " << ts.Cv(1, 1) << endl;
     Info<< "mu = " << ts.mu(1, 1) << endl;
     Info<< "kappa = " << ts.kappa(1, 1) << endl;
 
     Info << "\nPolynomial:" << endl;
     Info << "specie4" << endl;    
-    polynomialTransport tp(dict.subDict("specie4"));
+    polynomialTransport tp("specie4", dict.subDict("specie4"));
     scalar T = 400;
     Info<< "R = " << tp.R() << endl;
-    Info<< "cp = " << tp.cp(1, T) << endl;
+    Info<< "cp = " << tp.Cp(1, T) << endl;
     Info<< "Cp = " << tp.Cp(1, T) << endl;
-    Info<< "cv = " << tp.cv(1, T) << endl;
+    Info<< "cv = " << tp.Cv(1, T) << endl;
     Info<< "Cv = " << tp.Cv(1, T) << endl;
     Info<< "mu = " << tp.mu(1, T) << endl;
     Info<< "kappa = " << tp.kappa(1, T) << endl;
-    logPolynomialTransport tlp(dict.subDict("specie4"));
+    logPolynomialTransport tlp("specie4", dict.subDict("specie4"));
     Info<< "logmu = " << tlp.mu(1, T) << endl;
     Info<< "logkappa = " << tlp.kappa(1, T) << endl;
 
 
     Info << "\nH2O" << endl;    
-    sutherlandJanafTransport ts2(dict.subDict("H2O"));
+    sutherlandJanafTransport ts2("H2O", dict.subDict("H2O"));
     T = 400;
     scalar p = 1e5; //=Pstd to have fair comparison with references.
     Info<< "R = " << ts2.R() << endl;
-    Info<< "cp = " << ts2.cp(p, T) << endl;
+    Info<< "cp = " << ts2.Cp(p, T) << endl;
     Info<< "Cp = " << ts2.Cp(p, T) << endl;
-    Info<< "cv = " << ts2.cv(p, T) << endl;
+    Info<< "cv = " << ts2.Cv(p, T) << endl;
     Info<< "Cv = " << ts2.Cv(p, T) << endl;
     Info<< "mu = " << ts2.mu(p, T) << endl;
     Info<< "kappa = " << ts2.kappa(p, T) << endl;
@@ -148,13 +148,13 @@ int main(int argc, char *argv[])
 
 
     Info << "\nH2" << endl;    
-    sutherlandJanafTransport ts3(dict.subDict("H2"));
+    sutherlandJanafTransport ts3("H2", dict.subDict("H2"));
     T = 400;
     p = 1e5; //=Pstd to have fair comparison with references.
     Info<< "R = " << ts3.R() << endl;
-    Info<< "cp = " << ts3.cp(p, T) << endl;
+    Info<< "cp = " << ts3.Cp(p, T) << endl;
     Info<< "Cp = " << ts3.Cp(p, T) << endl;
-    Info<< "cv = " << ts3.cv(p, T) << endl;
+    Info<< "cv = " << ts3.Cv(p, T) << endl;
     Info<< "Cv = " << ts3.Cv(p, T) << endl;
     Info<< "mu = " << ts3.mu(p, T) << endl;
     Info<< "kappa = " << ts3.kappa(p, T) << endl;
@@ -165,11 +165,11 @@ int main(int argc, char *argv[])
     // for testing python module writing functions
     dictionary dict_py(IFstream("thermoDict_H2")());
     Info << "\nH2 from python" << endl;    
-    sutherlandJanafTransport ts_py(dict_py.subDict("H2"));
+    sutherlandJanafTransport ts_py("H2", dict_py.subDict("H2"));
     Info<< "R = " << ts_py.R() << endl;
-    Info<< "cp = " << ts_py.cp(p, T) << endl;
+    Info<< "cp = " << ts_py.Cp(p, T) << endl;
     Info<< "Cp = " << ts_py.Cp(p, T) << endl;
-    Info<< "cv = " << ts_py.cv(p, T) << endl;
+    Info<< "cv = " << ts_py.Cv(p, T) << endl;
     Info<< "Cv = " << ts_py.Cv(p, T) << endl;
     Info<< "mu = " << ts_py.mu(p, T) << endl;
     Info<< "kappa = " << ts_py.kappa(p, T) << endl;
@@ -177,12 +177,12 @@ int main(int argc, char *argv[])
     Info<< "s = " << ts_py.s(p, T) << endl;
 
     Info << "\nH2 polynomial transport from python" << endl;    
-    polynomialTransport ts_py_poly(dict_py.subDict("H2"));
+    polynomialTransport ts_py_poly("H2", dict_py.subDict("H2"));
     Info<< "mu = " << ts_py_poly.mu(p, T) << endl;
     Info<< "kappa = " << ts_py_poly.kappa(p, T) << endl;
 
     Info << "\nH2 log-polynomial transport from python" << endl;    
-    logPolynomialTransport ts_py_logpoly(dict_py.subDict("H2"));
+    logPolynomialTransport ts_py_logpoly("H2", dict_py.subDict("H2"));
     Info<< "mu = " << ts_py_logpoly.mu(p, T) << endl;
     Info<< "kappa = " << ts_py_logpoly.kappa(p, T) << endl;
 
@@ -199,9 +199,23 @@ int main(int argc, char *argv[])
     Info<< "dmu_logpoly = " << mag(ts_py_logpoly.mu(p, T)-ts_py_poly.mu(p, T))/ts_py_poly.mu(p, T) << endl;
     Info<< "dkappa_logpoly = " << mag(ts_py_logpoly.kappa(p, T)-ts_py_poly.kappa(p, T))/ts_py_poly.kappa(p, T)  << endl;
 
-    Info<< "dcp = " << mag(ts_py.cp(p, T)-ts3.cp(p, T))/ts3.cp(p, T) << endl;
+    Info<< "dcp = " << mag(ts_py.Cp(p, T)-ts3.Cp(p, T))/ts3.Cp(p, T) << endl;
     Info<< "dCp = " << mag(ts_py.Cp(p, T)-ts3.Cp(p, T))/ts3.Cp(p, T) << endl;
-    
+
+    // --- Synthetic NASA polynomial block (read from thermoDict_synth) ---
+    dictionary dict_syn(IFstream("thermoDict_synth")());
+    Info << "\nSYN from python" << endl;    
+    sutherlandJanafTransport ts_syn("SYN", dict_syn.subDict("SYN"));
+    Info<< "R = " << ts_syn.R() << endl;
+    Info<< "cp = " << ts_syn.Cp(p, T) << endl;
+    Info<< "Cp = " << ts_syn.Cp(p, T) << endl;
+    Info<< "cv = " << ts_syn.Cv(p, T) << endl;
+    Info<< "Cv = " << ts_syn.Cv(p, T) << endl;
+    Info<< "mu = " << ts_syn.mu(p, T) << endl;
+    Info<< "kappa = " << ts_syn.kappa(p, T) << endl;
+    Info<< "h = " << ts_syn.ha(p, T) << endl;
+    Info<< "s = " << ts_syn.s(p, T) << endl;
+
     Info<< "\nEnd\n" << endl;
 
 
