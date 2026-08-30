@@ -73,8 +73,9 @@ class Species:
         Tmax: float = 3000,
         Tmid: float = 1000,
         n: int = 128,
-        tol: float = 1e-2,
-        tol_c0: float = 1e-6,
+        tol_nasa7: float = 1e-2,
+        tol_nasa7_c0: float = 1e-6,
+        tol_transport: float = 1e-1
     ) -> Self:  # TODO: add hint to other from funcs.
         """
         Construct based on cantera Species object.
@@ -82,7 +83,7 @@ class Species:
         species = gas.species(gas.species_index(species_name))
         W = species.molecular_weight
         elements = species.composition
-        nasa7 = NASA7Polynomial.from_ct(species, Tmin, Tmax, Tmid, n, tol_c0)
+        nasa7 = NASA7Polynomial.from_ct(species, Tmin, Tmax, Tmid, n, tol_nasa7_c0)
         T = np.linspace(Tmin, Tmax, n)
         sutherland = Sutherland.from_ct(gas, T)
         polynomial = Polynomial.from_ct(gas, T)
@@ -98,20 +99,36 @@ class Species:
         err_s = quality["consistency"]["s"]
         max_err = max(err_cp, err_h, err_s)
 
-        if max_c0 > tol_c0 or max_err > tol:
+        if max_c0 > tol_nasa7_c0 or max_err > tol_nasa7:
             # TODO: test figure path
             # Save plot to tmp
             import tempfile
 
-            fig_path = Path(tempfile.TemporaryFile().name + ".png")
+            fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
             cls.plot_nasa7_fit(species, nasa7, fig_path)
             raise ValueError(
-                f"NASA7 polynomial quality failed with tol={tol}."
-                f"Overall fit quality is as follows:\n{quality}"
+                f"NASA7 polynomial quality failed with tol={tol_nasa7}."
+                f" Overall fit quality is as follows:\n{quality}"
                 f"\nPlease see figure: {fig_path}"
             )
 
-        # TODO: We should raise for other fits as well!!!
+        ref_data =  TransportData.from_ct(gas, T)
+        for tfi in [sutherland, polynomial, log_polynomial]:
+            err = tfi.evaluate_transport_fit_quality(ref_data)
+            if err["mu"] > tol_transport or err["kappa"] > tol_transport:
+                import tempfile
+                fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
+                plot_transport_fits(
+                    ref_data,
+                    [sutherland, polynomial, log_polynomial],
+                    fig_path
+                )
+                raise ValueError(
+                    "Transport function fit error is too large:"
+                    f"\n    L2 error for viscosity: {err["mu"]}"
+                    f"\n    L2 error for conductivity: {err["kappa"]}"
+                    f"\nPlease, see figure: {fig_path}"
+                )
 
         return cls(
             name=species_name,
@@ -193,8 +210,9 @@ class SpeciesList:
         n: int = 128,
         plot: bool = True,
         fig_dir: Path = Path.cwd(),
-        tol: float = 1e-2,
-        tol_c0: float = 1e-6,
+        tol_nasa7: float = 1e-2,
+        tol_nasa7_c0: float = 1e-6,
+        tol_transport: float = 1e-1
     ) -> Self:
         """
         Build species container based on cantera mechanism file and refit
@@ -206,7 +224,7 @@ class SpeciesList:
         species_list = []
         # Construct Species object and append to a list
         for sp_name in gas.species_names:
-            spi = Species.from_ct(gas, sp_name, Tmin, Tmax, Tmid, n, tol, tol_c0)
+            spi = Species.from_ct(gas, sp_name, Tmin, Tmax, Tmid, n, tol_nasa7, tol_nasa7_c0, tol_transport)
             species_list.append(spi)
 
             # Plot comparison to the reference data

@@ -58,7 +58,50 @@ class TransportData:
         return cls(temperature=temperature, gas_constant=ct.gas_constant, mu=mu, k=k, cp=cp, cv=cv, W=W)
 
 
-class Sutherland:
+class TransportFunction:
+    """
+    Base class for viscosity/thermal-conductivity transport fits (Sutherland,
+    Polynomial, LogPolynomial). Subclasses must implement mu() and kappa();
+    kappa() signatures may differ (e.g. Sutherland's Euken formula also needs
+    thermodynamic data), so _kappa_from_data() is the common entry point used
+    when only a TransportData reference is available.
+    """
+
+    name: str = "transport_function"
+
+    def mu(self, T: Union[float, np.ndarray]):
+        """Evaluate viscosity. Must be implemented by subclasses."""
+        raise NotImplementedError
+
+    def kappa(self, T: Union[float, np.ndarray], *args, **kwargs):
+        """Evaluate thermal conductivity. Must be implemented by subclasses."""
+        raise NotImplementedError
+
+    def _kappa_from_data(self, T: Union[float, np.ndarray], reference_data: TransportData):
+        """
+        Evaluate kappa(T) using a TransportData reference for any auxiliary
+        arguments. Default just forwards to kappa(T); Sutherland overrides
+        this since its Euken formula also requires cv, W and R.
+        """
+        return self.kappa(T)
+
+    def evaluate_transport_fit_quality(self, reference_data: TransportData) -> dict:
+        """
+        Evaluate L2 error between this transport fit and reference data.
+        Return dictionary for viscosity and kappa error estimates.
+        """
+        T = reference_data.temperature
+
+        mu_fit = self.mu(T)
+        kappa_fit = self._kappa_from_data(T, reference_data)
+
+        err_mu = np.linalg.norm(mu_fit - reference_data.mu) / np.linalg.norm(reference_data.mu)
+        err_kappa = np.linalg.norm(kappa_fit - reference_data.k) / np.linalg.norm(reference_data.k)
+
+        return {"mu": err_mu, "kappa": err_kappa}
+
+
+class Sutherland(TransportFunction):
     """Sutherland viscosity model with Euken thermal conductivity."""
     # TODO: is std_error needed?
     def __init__(self, As, Ts, std_err=None):
@@ -127,10 +170,14 @@ class Sutherland:
         Rspecific = R / W
         return mu_val * Cv * (1.32 + 1.77 * Rspecific / Cv)
 
+    def _kappa_from_data(self, T, reference_data: TransportData):
+        """Evaluate Euken kappa using cv, W and R from the reference data."""
+        return self.kappa(T, reference_data.cv, reference_data.W, reference_data.gas_constant)
 
 
 
-class Polynomial:
+
+class Polynomial(TransportFunction):
     """Standard or log-polynomial transport fit."""
 
     def __init__(self, coeffs_mu, coeffs_kappa, poly_type="polynomial"):
@@ -182,7 +229,7 @@ class Polynomial:
         return f(T)
 
 
-class LogPolynomial:
+class LogPolynomial(TransportFunction):
     """Log-polynomial transport fit."""
 
     def __init__(self, coeffs_mu, coeffs_kappa):
@@ -240,7 +287,7 @@ class LogPolynomial:
 
 def plot_transport_fits(
     data: TransportData,
-    fits: List[Union[Sutherland,Polynomial,LogPolynomial]],
+    fits: List[TransportFunction],
     file_path: Path,
 ):
     """
@@ -261,10 +308,7 @@ def plot_transport_fits(
 
     for fit in  fits:
         ax1.plot(T, fit.mu(T), linestyle=next(linestyles), color=next(colors), label=fit.name)
-        if isinstance(fit, Sutherland):
-            kappa = fit.kappa(T, data.cv, data.W, data.gas_constant)
-        else:
-            kappa = fit.kappa(T)
+        kappa = fit._kappa_from_data(T, data)
 
         ax2.plot(T, kappa, linestyle=next(linestyles), color=next(colors), label=fit.name)
 

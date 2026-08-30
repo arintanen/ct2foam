@@ -6,9 +6,8 @@ from pathlib import Path
 from ct2foam.species import SpeciesList
 from ct2foam.mixture import Mixture
 
-# TODO: remove test data
-# TODO: how many n points?
 # TODO: go through TODOS
+# TODO: Mention that the idea is to fit with common temperature which is OF requirement
 # TODO: Add README examples
 # LICENSE + docstrings - CHECK lsqlin MIT licence - is it contaminating this to MIT as well?
 # Go through the original TODO.md
@@ -30,7 +29,7 @@ def main():
         "-o",
         "--output",
         type=str,
-        help="Output directory path. (default is current directory)",
+        help="(Optional) Output directory path. (default is current directory)",
         default=Path.cwd(),
         required=False,
     )
@@ -38,7 +37,7 @@ def main():
         "-T",
         "--Tmid",
         type=float,
-        help="Common temperature for NASA-7 polynomials.",
+        help="(Optional) Common temperature for NASA-7 polynomials.",
         default=1000.0,
         required=False,
     )
@@ -46,7 +45,7 @@ def main():
         "-Tl",
         "--Tlow",
         type=float,
-        help="Temperature low-limit for NASA-7 polynomials.",
+        help="(Optional) Temperature low-limit for NASA-7 polynomials.",
         default=280.0,
         required=False,
     )
@@ -54,7 +53,7 @@ def main():
         "-Th",
         "--Thigh",
         type=float,
-        help="Temperature high-limit for NASA-7 polynomials.",
+        help="(Optional) Temperature high-limit for NASA-7 polynomials.",
         default=3000.0,
         required=False,
     )
@@ -81,7 +80,7 @@ def main():
     )
     parser.add_argument(
         "-t",
-        "--tol",
+        "--tol-nasa7",
         type=float,
         help="(Optional) Tolerance for NASA-7 polynomial fit error.",
         default=1e-2,
@@ -89,10 +88,18 @@ def main():
     )
     parser.add_argument(
         "-tc0",
-        "--tol-c0",
+        "--tol-nasa7-c0",
         type=float,
         help="(Optional) Tolerance for NASA-7 polynomial C0 continuity.",
         default=1e-6,
+        required=False,
+    )
+    parser.add_argument(
+        "-tt",
+        "--tol-transport",
+        type=float,
+        help="(Optional) Tolerance for all transport function fits.",
+        default=1e-1,
         required=False,
     )
 
@@ -126,8 +133,9 @@ def main():
             n=256,
             plot=True,
             fig_dir=fig_dir,
-            tol=args.tol,
-            tol_c0=args.tol_c0
+            tol_nasa7=args.tol_nasa7,
+            tol_nasa7_c0=args.tol_nasa7_c0,
+            tol_transport=args.tol_transport
         )
 
         mixture.write_foam(output_dir)
@@ -143,8 +151,8 @@ def main():
         n=256,
         plot=True,
         fig_dir=fig_dir,
-        tol=args.tol,
-        tol_c0=args.tol_c0
+        tol_nasa7=args.tol_nasa7,
+        tol_nasa7_c0=args.tol_nasa7_c0
     )
     species_list.write_foam(output_dir)
     print("\nDone")

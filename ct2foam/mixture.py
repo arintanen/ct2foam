@@ -64,8 +64,9 @@ class Mixture:
         n: int = 128,
         plot: bool = True,
         fig_dir: Path = Path.cwd(),
-        tol: float = 1e-2,
-        tol_c0: float = 1e-6,
+        tol_nasa7: float = 1e-2,
+        tol_nasa7_c0: float = 1e-6,
+        tol_transport: float = 1e-1
     ) -> Self:  # TODO: add hint to other from funcs.
         """
         Construct based on cantera Solution. It is assumed the gas object has
@@ -91,21 +92,36 @@ class Mixture:
         err_s = quality["consistency"]["s"]
         max_err = max(err_cp, err_h, err_s)
 
-        if max_c0 > tol_c0 or max_err > tol:
-            # TODO: test figure path
-            # Save plot to tmp
-            import tempfile
+        ref_data_thermo = ThermoData.from_ct_mixture(gas, T)
+        ref_data_transport = TransportData.from_ct(gas, np.linspace(Tmin, Tmax, n))
 
-            fig_path = Path(tempfile.TemporaryFile().name + ".png")
-            ref_data = ThermoData.from_ct_mixture(gas, T)
-            plot_nasa7_fit(ref_data, nasa7, fig_path)
+
+        if max_c0 > tol_nasa7_c0 or max_err > tol_nasa7:
+            import tempfile
+            fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
+            plot_nasa7_fit(ref_data_thermo, nasa7, fig_path)
             raise ValueError(
-                f"NASA7 polynomial quality failed with tol={tol}."
+                f"NASA7 polynomial quality failed with tol={tol_nasa7}."
                 f"Overall fit quality is as follows:\n{quality}"
                 f"\nPlease see figure: {fig_path}"
             )
 
-        # TODO: We should raise for other fits as well!!!
+        for tfi in [sutherland, polynomial, log_polynomial]:
+            err = tfi.evaluate_transport_fit_quality(ref_data)
+            if err["mu"] > tol_transport or err["kappa"] > tol_transport:
+                import tempfile
+                fig_path = Path(tempfile.NamedTemporaryFile(suffix=".png").name)
+                plot_transport_fits(
+                    ref_data_transport,
+                    [sutherland, polynomial, log_polynomial],
+                    fig_path
+                )
+                raise ValueError(
+                    "Transport function fit error is too large:"
+                    f"\n    L2 error for viscosity: {err["mu"]}"
+                    f"\n    L2 error for conductivity: {err["kappa"]}"
+                    f"\nPlease, see figure: {fig_path}"
+                )
 
         X = {name: x for name, x in zip(gas.species_names, gas.X) if x > 0}
 
@@ -113,14 +129,10 @@ class Mixture:
         if plot:
             print(f"- Saving fit figures under {fig_dir}")
             fig_path = Path(fig_dir, f"{mixture_name}_thermo.png")
-            ref_data = ThermoData.from_ct_mixture(gas, T)
-            plot_nasa7_fit(ref_data, nasa7, fig_path)
+            plot_nasa7_fit(ref_data_thermo, nasa7, fig_path)
 
-            ref_data = TransportData.from_ct(
-                gas, np.linspace(Tmin, Tmax, n)
-            )
             plot_transport_fits(
-                data=ref_data,
+                data=ref_data_transport,
                 fits=[sutherland, polynomial, log_polynomial],
                 file_path=Path(fig_dir, f"{mixture_name}_transport.png"),
             )
