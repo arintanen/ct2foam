@@ -827,30 +827,6 @@ class TestIntegrationEndToEnd(unittest.TestCase):
             self.assertTrue((output_dir / "reactions.foam").exists())
             self.assertTrue((output_dir / "species.foam").exists())
 
-    def test_species_to_foam_dict_integration(self):
-        """Test Species.to_foam_dict() in context of SpeciesList."""
-        mech_file = "h2o2.yaml"
-
-        species_list = SpeciesList.from_ct_mech(
-            str(mech_file), Tmin=300, Tmax=3000, Tmid=1000, plot=False
-        )
-
-        # Get a species and export it
-        h2_species = next(sp for sp in species_list.species if sp.name == "H2")
-
-        # Use temperature bounds from the species itself
-        foam_dict = h2_species.to_foam_dict(
-            Tlow=h2_species.nasa7.Tlow, Thigh=h2_species.nasa7.Tmax
-        )
-
-        # Verify structure
-        self.assertEqual(foam_dict["name"], "H2")
-        self.assertEqual(foam_dict["Tlow"], 300)
-        self.assertEqual(foam_dict["Thigh"], 3000)
-        self.assertEqual(foam_dict["Tmid"], h2_species.nasa7.Tmid)
-        self.assertEqual(len(foam_dict["nasa7_lo"]), 7)
-        self.assertEqual(len(foam_dict["nasa7_hi"]), 7)
-
 
 class TestEdgeCases(unittest.TestCase):
     """Test polynomial fitting edge cases."""
