@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ct2foam"
+version = "2.0.0"
+description = "Convert Cantera thermophysical data into OpenFOAM dictionary format."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPLv3" }
+authors = [
+    { name = "Heikki Kahila", email = "heikki.kahila@gmail.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "cvxopt>=1.2.0",
+    "numpy>=1.20",
+    "scipy>=1.5.2",
+    "matplotlib>=3.3",
+]
+
+[project.scripts]
+ct2foam = "ct2foam.ct2foam:main"
+
+[dependency-groups]
+dev = [
+    "cantera>=2.5.1",
+]
+
+[tool.setuptools]
+packages = ["ct2foam", "ct2foam.tests"]
