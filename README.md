@@ -10,14 +10,30 @@ This python package utilises [Cantera](https://cantera.org/) to generate such en
 
 ## Installation
 
-```
+With [uv](https://docs.astral.sh/uv/):
+
+```bash
 git clone git@github.com:kahilah/ct2foam.git
 cd ct2foam
+uv sync
+```
+
+Run commands in the managed environment with `uv run`, for example:
+
+```bash
+uv run ct2foam --help
+uv run python -m unittest discover
+```
+
+Alternatively, install with pip after installing Cantera separately (for example,
+from conda-forge):
+
+```bash
 pip install .
 ```
 
 ## Run tests:
-```
+```bash
 python -m unittest discover
 ```
 
