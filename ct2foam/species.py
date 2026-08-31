@@ -125,8 +125,8 @@ class Species:
                 )
                 raise ValueError(
                     "Transport function fit error is too large:"
-                    f"\n    L2 error for viscosity: {err["mu"]}"
-                    f"\n    L2 error for conductivity: {err["kappa"]}"
+                    f"\n    L2 error for viscosity: {err['mu']}"
+                    f"\n    L2 error for conductivity: {err['kappa']}"
                     f"\nPlease, see figure: {fig_path}"
                 )
 
