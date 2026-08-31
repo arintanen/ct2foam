@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "GPLv3" }
 authors = [
-    { name = "Heikki Kahila", email = "heikki.kahila@gmail.com" },
+    { name = "Heikki Kahila", email = "k4h114h@proton.me" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

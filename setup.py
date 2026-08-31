@@ -8,7 +8,7 @@ setuptools.setup(
 	name="ct2foam",
 	version="2.0.0",
 	author="Heikki Kahila",
-	author_email="heikki.kahila@gmail.com",
+	author_email="k4h114h@proton.me",
 	description="A package converting Cantera thermophysical data into OpenFOAM dictionary format.",
 	long_description=long_description,
 	long_description_content_type="text/markdown",
