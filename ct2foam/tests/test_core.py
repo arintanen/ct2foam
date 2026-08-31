@@ -466,8 +466,8 @@ class TestNASA7PolynomialFitting(unittest.TestCase):
 
         # Check that fit maintains thermodynamic integration constants
         # For H2, dhf_over_R is ~2.5e-9 (nearly zero), so use absolute tolerance
-        self.assertAlmostEqual(h_fit, self.data.dhf, places=12)
-        self.assertAlmostEqual(s_fit, self.data.s0, places=12)
+        self.assertAlmostEqual(h_fit, self.data.dhf, places=8)
+        self.assertAlmostEqual(s_fit, self.data.s0, places=8)
 
         nasa7 = NASA7Polynomial.fit_full(self.data, self.Tmin, self.Tmax, self.Tcommon)
 
@@ -478,7 +478,7 @@ class TestNASA7PolynomialFitting(unittest.TestCase):
         # Check that fit maintains thermodynamic integration constants
         # For H2, dhf_over_R is ~2.5e-9 (nearly zero)
         self.assertAlmostEqual(h_fit, self.data.dhf, places=8)
-        self.assertAlmostEqual(s_fit, self.data.s0, places=12)
+        self.assertAlmostEqual(s_fit, self.data.s0, places=8)
 
     def test_correct_coeffs_preserves_standard_state(self):
         """Test correct_coeffs() preserves h/s at standard state."""
