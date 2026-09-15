@@ -98,7 +98,7 @@ class ReactionsWriter:
             case ct.LindemannRate():
 
                 self.write_type(
-                    "ArrheniusLindemannFallOff", 
+                    "ArrheniusLindemannFallOff",
                     rxn
                 )
                 with self.block("k0"):
@@ -106,6 +106,9 @@ class ReactionsWriter:
 
                 with self.block("kInf"):
                     self.write_arrhenius(rate.high_rate)
+
+                with self.block("F"):
+                    pass
 
                 with self.block("thirdBodyEfficiencies"):
                     self.write_efficiencies(
@@ -115,7 +118,7 @@ class ReactionsWriter:
             case ct.TroeRate():
 
                 self.write_type(
-                    "ArrheniusTroeFallOff", 
+                    "ArrheniusTroeFallOff",
                     rxn
                 )
 
@@ -148,7 +151,7 @@ class ReactionsWriter:
             case ct.PlogRate():
                 raise RuntimeError("PLOG reactions not supported yet in OpenFOAM")
                 self.write_type(
-                    "ArrheniusPLOG", 
+                    "ArrheniusPLOG",
                     rxn
                 )
 
