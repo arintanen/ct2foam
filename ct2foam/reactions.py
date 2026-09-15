@@ -35,7 +35,7 @@ class ReactionsWriter:
         self.write(f"beta    {beta:.16g};")
         self.write(f"Ta      {Ta:.16g};")
 
-    def write_efficiencies(self, third_body):
+    def write_efficiencies(self, third_body, species_names):
 
         if not third_body:
             return
@@ -44,13 +44,16 @@ class ReactionsWriter:
             return
 
         self.write("coeffs")
-        self.write(str(len(third_body.efficiencies)))
+        self.write(str(len(species_names)))
         self.write("(")
         self.level += 1
-        for sp, eff in sorted(third_body.efficiencies.items()):
-            self.write(f"({sp:<12} {eff})")
+
+        for sp in species_names:
+            eff = third_body.efficiencies.get(sp, 1.0)
+            self.write(f"({sp:<12} {eff:g})")
         self.level -= 1
         self.write(");")
+
     def format_species(self, species_dict):
         terms = []
 
@@ -74,7 +77,7 @@ class ReactionsWriter:
 
         self.write(f'reaction "{lhs} = {rhs}";')
 
-    def write_reaction(self, rxn):
+    def write_reaction(self, rxn, species_names):
 
         rate = rxn.rate
 
@@ -93,6 +96,7 @@ class ReactionsWriter:
 
                 self.write_efficiencies(
                     rxn.third_body,
+                    species_names,
                 )
 
             case ct.LindemannRate():
@@ -113,6 +117,7 @@ class ReactionsWriter:
                 with self.block("thirdBodyEfficiencies"):
                     self.write_efficiencies(
                         rxn.third_body,
+                        species_names,
                     )
 
             case ct.TroeRate():
@@ -129,7 +134,6 @@ class ReactionsWriter:
                     self.write_arrhenius(rate.high_rate)
 
                 with self.block("F"):
-
                     alpha, Tsss, Ts = rate.falloff_coeffs[:3]
 
                     Tss = (
@@ -142,9 +146,11 @@ class ReactionsWriter:
                     self.write(f"Tsss  {Tsss};")
                     self.write(f"Ts    {Ts};")
                     self.write(f"Tss   {Tss};")
+
                 with self.block("thirdBodyEfficiencies"):
                     self.write_efficiencies(
-                        rxn.third_body
+                        rxn.third_body,
+                        species_names
                     )
 
             case ct.PlogRate():
@@ -192,13 +198,17 @@ class ReactionsWriter:
     def convert(self, mechanism):
 
         gas = ct.Solution(mechanism)
+        species_names = gas.species_names
 
         with self.block("reactions"):
             for i, rxn in enumerate(gas.reactions(), start=1):
 
                 with self.block(f"reaction{i}"):
 
-                    self.write_reaction(rxn)
+                    self.write_reaction(
+                        rxn,
+                        species_names,
+                    )
 
 
     def save(self, filename):
