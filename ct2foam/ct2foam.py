@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ct2foam.species import SpeciesList
 from ct2foam.mixture import Mixture
+from ct2foam.reactions import ReactionsWriter
 
 
 def main():
@@ -109,7 +110,13 @@ def main():
         default=1e-1,
         required=False,
     )
-
+    parser.add_argument(
+        "-r",
+        "--reactions",
+        action="store_true",
+        help="(Optional) Output the reactions as OpenFOAM format.",
+        required=False,
+    )
     args = parser.parse_args()
 
     mechanism = args.input
@@ -162,6 +169,10 @@ def main():
         tol_nasa7_c0=args.tol_nasa7_c0,
     )
     species_list.write_foam(output_dir)
+    if args.reactions:
+        writer = ReactionsWriter()
+        writer.convert(mechanism)
+        writer.save(output_dir / "reactions.foam")
     print("\nDone")
 
 

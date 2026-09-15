@@ -19,17 +19,6 @@ def write_species_list(file_name: Path, species_names: list[str]):
             output.write("\n")
         output.write(");\n\n")
 
-
-def write_reactions(file_name: Path):
-    """
-    Writes an empty reactions.foam file with an OpenFOAM formatted list of 0 reactions.
-    """
-    with open(file_name, "a") as output:
-        output.write("// - This dictionary intentionally left blank.\n")
-        output.write("reactions\n{\n")
-        output.write("}\n\n")
-
-
 def write_thermo_transport(
     file_name: Path,
     name: str,
@@ -181,8 +170,6 @@ def write_foam(species: "SpeciesList", output_dir: Path):
     thermo_file.unlink(missing_ok=True)
     reactions_file.unlink(missing_ok=True)
     species_file.unlink(missing_ok=True)
-
-    write_reactions(reactions_file)
 
     names = [sp.name for sp in species if sp.nasa7 is not None]
     write_species_list(species_file, names)
