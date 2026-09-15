@@ -138,11 +138,10 @@ class ReactionsWriter:
                         else 4.503599627e15 # great value in openfoam
                     )
 
-                    with self.block("F"):
-                        self.write(f"alpha {alpha};")
-                        self.write(f"Tsss  {Tsss};")
-                        self.write(f"Ts    {Ts};")
-                        self.write(f"Tss   {Tss};")
+                    self.write(f"alpha {alpha};")
+                    self.write(f"Tsss  {Tsss};")
+                    self.write(f"Ts    {Ts};")
+                    self.write(f"Tss   {Tss};")
                 with self.block("thirdBodyEfficiencies"):
                     self.write_efficiencies(
                         rxn.third_body
