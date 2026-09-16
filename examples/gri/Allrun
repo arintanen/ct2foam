@@ -1,0 +1,17 @@
+#!/bin/sh
+cd ${0%/*} || exit 1    # Run from this directory
+
+# Source tutorial run functions
+. $WM_PROJECT_DIR/bin/tools/RunFunctions
+
+./Allclean
+
+rm -rf constant/foam
+
+ct2foam --input gri30.yaml --reactions --output constant/foam --Tmid 1000.0 --plot
+
+runApplication chemFoam
+
+(cd validation && ./Allrun $*)
+
+#------------------------------------------------------------------------------

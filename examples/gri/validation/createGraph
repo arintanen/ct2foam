@@ -1,0 +1,24 @@
+#!/bin/sh
+
+if ! which gnuplot > /dev/null 2>&1
+then
+    echo "gnuplot not found - skipping graph creation" >&2
+    exit 1
+fi
+
+gnuplot<<EOF
+    set terminal pngcairo size 1600,1000 enhanced font "Helvetica,20"
+    set output "OF_vs_Cantera.png"
+    set xlabel "Time / [s]" font "Helvetica,24"
+    set ylabel "Temperature / [K]" font "Helvetica,24"
+    set grid
+    set key left top
+    set xrange [0:0.07]
+    set yrange [750:3000]
+    set ytic 250
+    plot \
+        "../chemFoam.out" u 1:2 t "OpenFOAM" with points lt 1 pt 6 ps 1.5,\
+        "cantera.out" with lines title "Cantera 3.2" lt -1
+EOF
+
+#------------------------------------------------------------------------------

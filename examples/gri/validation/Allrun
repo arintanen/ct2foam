@@ -1,0 +1,13 @@
+#!/bin/sh
+cd ${0%/*} || exit 1    # Run from this directory
+
+python3 -c 'import cantera' 2>/dev/null ||
+{
+    echo "Cantera is required; activate its Python environment before running this case" >&2
+    exit 1
+}
+
+python3 canteraSimulation.py || exit 1
+./createGraph
+
+#------------------------------------------------------------------------------
