@@ -9,6 +9,7 @@ This file contains 76 tests originally from test_v2.py, updated to work with:
 import unittest
 import tempfile
 import numpy as np
+import subprocess
 from pathlib import Path
 
 import cantera as ct
@@ -776,7 +777,6 @@ class TestSpeciesList(unittest.TestCase):
 
             # Check files exist
             self.assertTrue((output_dir / "thermo.foam").exists())
-            self.assertTrue((output_dir / "reactions.foam").exists())
             self.assertTrue((output_dir / "species.foam").exists())
 
             # Check thermo file has content
@@ -800,6 +800,56 @@ class TestSpeciesList(unittest.TestCase):
         for name in cantera_names:
             self.assertIn(name, dataset_names)
 
+class TestCLI(unittest.TestCase):
+    """Test ct2foam command-line interface."""
+
+    def setUp(self):
+        self.mech_file = "h2o2.yaml"
+
+    def test_cli_reactions_option_creates_reactions_file(self):
+        """Test that --reactions creates reactions.foam."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "foam_output"
+
+            result = subprocess.run(
+                [
+                    "ct2foam",
+                    "-i",
+                    self.mech_file,
+                    "-o",
+                    str(output_dir),
+                    "--reactions",
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertTrue((output_dir / "thermo.foam").exists())
+            self.assertTrue((output_dir / "species.foam").exists())
+            self.assertTrue((output_dir / "reactions.foam").exists())
+
+    def test_cli_without_reactions_does_not_create_reactions_file(self):
+        """Test that reactions.foam is not created by default."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / "foam_output"
+
+            result = subprocess.run(
+                [
+                    "ct2foam",
+                    "-i",
+                    self.mech_file,
+                    "-o",
+                    str(output_dir),
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertTrue((output_dir / "thermo.foam").exists())
+            self.assertTrue((output_dir / "species.foam").exists())
+            self.assertFalse((output_dir / "reactions.foam").exists())
 
 class TestIntegrationEndToEnd(unittest.TestCase):
     """Integration tests for complete workflow."""
@@ -823,7 +873,6 @@ class TestIntegrationEndToEnd(unittest.TestCase):
 
             # Verify files
             self.assertTrue((output_dir / "thermo.foam").exists())
-            self.assertTrue((output_dir / "reactions.foam").exists())
             self.assertTrue((output_dir / "species.foam").exists())
 
 
